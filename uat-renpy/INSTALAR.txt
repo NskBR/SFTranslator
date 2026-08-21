@@ -1,0 +1,128 @@
+=====================================================================
+  UAT - Universal Auto Translator para Ren'Py (estilo XUnity)
+=====================================================================
+
+TRADUZ DIRETO NA TELA do jogo, em tempo real, sem precisar editar
+arquivos do jogo (.rpa criptografado nao importa).
+
+---------------------------------------------------------------------
+LAUNCHER MODULAR E MODELOS
+---------------------------------------------------------------------
+
+Ao abrir lt.exe, o UAT mostra o jogo detectado, o par de idiomas ativo
+e se o modelo direto esta instalado:
+
+  ENTER  - inicia o tradutor e abre o jogo
+  C      - escolhe idioma fonte/destino, baixa e ativa o modelo direto
+  M      - lista os modelos instalados
+  Q/ESC  - sai
+
+O catalogo vem do indice oficial do Argos Translate. O UAT oferece
+somente pares DIRETOS (ex.: ja -> en); ele nao cria traducao por pivo.
+Os modelos baixados ficam em models/argos-translate/packages/.
+
+Cada par usa cache separado em uat/caches/, por exemplo:
+
+  uat_cache_en_pb.json
+  uat_cache_ja_en.json
+
+Assim, trocar os idiomas nao mistura traducoes antigas.
+
+O PACK (pasta UAT-Pack):
+  lt.exe      - LAUNCHER + tradutor local embutido (fica na RAIZ)
+  _internal/  - arquivos do tradutor (PyInstaller)
+  models/     - modelos Argos embutidos (tradutor sem internet)
+  uat/        - motor do UAT (hooks, config, cache, logs)
+  game/       - uat_hook.rpy (o arquivo que o Ren'Py carrega no init)
+
+---------------------------------------------------------------------
+  QUICK START (so copiar e abrir - sem comando)
+---------------------------------------------------------------------
+1. Basta extrair os arquivos dentro da pasta raiz do game e abrir o tl.exe
+2. Por enquanto a tradução só funciona do Inglês para Português Brasil
+
+---------------------------------------------------------------------
+  OPCAO 1: INSTALACAO AUTOMATICA (recomendado)
+---------------------------------------------------------------------
+1. Precisa de Python 3 (https://www.python.org - marque "Add to PATH").
+2. Abra o terminal (CMD/PowerShell) na pasta UAT-Pack.
+3. Rode:
+
+      python install_uat.py "C:\caminho\completo\do\jogo"
+
+   Exemplos:
+      python install_uat.py "D:\Jogos\MeuJogo-1.0-pc"
+      python install_uat.py "C:\Games\OutroJogo" prov=local --setup-lt
+
+   O script copia lt.exe + _internal/ + models/ pra RAIZ do jogo
+   (lt.exe fica na mesma pasta do exe do game), copia uat/ e joga o
+   uat_hook.rpy dentro de game/.
+
+   Argumentos opcionais:
+      src=en            (idioma ORIGEM, padrao en)
+      tgt=pt            (idioma DESTINO, padrao pt)
+      prov=google_free  (tradutor online: google_free, google_v2, deepl_free)
+      prov=local        (tradutor LOCAL embutido - padrao do pack)
+      --setup-lt        (com prov=local: aquece o tradutor AGORA)
+
+---------------------------------------------------------------------
+  OPCAO 2: INSTALACAO MANUAL (ou via explorador)
+---------------------------------------------------------------------
+Copie para a pasta do jogo (onde fica a pasta 'game/' e o exe do jogo):
+
+   UAT-Pack/lt.exe + _internal/ + models/  ->  <jogo>/   (lt.exe ao lado do exe do game)
+   UAT-Pack/uat/          ->  <jogo>/uat/
+   UAT-Pack/game/uat_hook.rpy  ->  <jogo>/game/uat_hook.rpy
+
+Tambem funciona colar a pasta UAT-Pack INTEIRA dentro do jogo
+(<jogo>/UAT-Pack/): o hook acha o 'uat/' sozinho e o lt.exe acha o jogo
+subindo as pastas. Nesse caso voce pode abrir o joguinho pelo
+<jogo>/UAT-Pack/lt.exe.
+
+Ja tem o UAT instalado de antes? So substitua a pasta 'uat/' antiga,
+copie o lt.exe novo (e _internal/ + models/) pra raiz e abra o jogo.
+
+---------------------------------------------------------------------
+  COMO USAR (a partir daqui voce escolhe)
+---------------------------------------------------------------------
+JEITO A - pelo lt.exe (duplo clique no <jogo>/lt.exe):
+   1. O lt.exe sobe o tradutor embutido SOZINHO (primeira vez demora
+      ~5-10s ate ficar pronto; depois e mais rapido).
+   2. Ele ABRE o jogo pra voce automaticamente (mesmo exe que voce
+      usa, so que com o tradutor local no ar).
+   3. Feche o jogo -> o console fecha junto e o tradutor para.
+
+JEITO B - abrindo o jogo normalmente (duplo clique no exe do game):
+   1. O jogo abre; o UAT percebe que o tradutor nao esta aberto,
+      sobe o lt.exe sozinho em segundo plano e reinicia se cair.
+   2. Traduz tudo igual. Nesse jeito o lt.exe fica rodando em
+      segundo plano (veja os logs em uat/UAlogs/).
+
+Nos dois jeitos:
+   - O dialogo aparece em INGLES primeiro e vira PORTUGUES na caixa
+     depois de ~1-2 segundos (se voce nao avancar).
+   - Traducoes ficam salvas em uat/uat_cache.json - nas proximas
+     execucoes o jogo ja abre tudo traduzido, sem gastar internet.
+
+---------------------------------------------------------------------
+  CONFIGURACAO  (<jogo>/uat/uat_config.json, abra no bloco de notas)
+---------------------------------------------------------------------
+   "source_language": "en"   idioma ORIGEM do jogo
+   "target_language": "pt-BR" idioma que voce quer ver
+   "provider": "local"       local = tradutor embutido (recomendado)
+
+---------------------------------------------------------------------
+  LOGS (todos ficam em <jogo>/uat/UAlogs/)
+---------------------------------------------------------------------
+   uat_log.txt     - log do UAT (o que traduziu, erros)
+   lt_server.log   - log do servidor LibreTranslate em si
+
+---------------------------------------------------------------------
+  REQUISITOS
+---------------------------------------------------------------------
+- Jogo Ren'Py (testado na 7.x e 8.x).
+- Sem internet pro tradutor local (modelos ja vem dentro do pack).
+- Se usar prov online (google_free etc.): internet e limite de
+  requisicoes no 1o uso. O cache evita re-traduzir o que ja foi feito.
+
+=====================================================================

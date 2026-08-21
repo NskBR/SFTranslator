@@ -1,0 +1,15 @@
+{
+  "api_key": "",
+  "cache_file": "uat_cache.json",
+  "local": {
+    "api_key": "",
+    "endpoint": "http://127.0.0.1:5000/translate",
+    "timeout": 5
+  },
+  "log_level": "INFO",
+  "max_text_length": 500,
+  "provider": "local",
+  "show_console": false,
+  "source_language": "en",
+  "target_language": "pb"
+}

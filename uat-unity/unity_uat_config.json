@@ -1,0 +1,8 @@
+{
+  "source_language": "en",
+  "target_language": "pt-BR",
+  "languages_configured": false,
+  "server": {
+    "port": 5001
+  }
+}

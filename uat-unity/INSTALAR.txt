@@ -1,0 +1,55 @@
+=====================================================================
+  UAT-UNITY - INSTALACAO MODULAR
+=====================================================================
+
+FORMA RECOMENDADA
+
+1. Copie a pasta UAT-Unity para a raiz do jogo:
+
+   MeuJogo/
+     MeuJogo.exe
+     MeuJogo_Data/
+     UAT-Unity/
+       lt.exe
+       _internal/
+       models/
+
+2. Abra UAT-Unity/lt.exe.
+3. O launcher detecta automaticamente:
+   - Unity Mono ou Unity IL2CPP;
+   - executavel x86 ou x64;
+   - modulo BepInEx/XUnity correspondente.
+4. Na primeira execucao, confirme a instalacao e escolha os idiomas.
+
+MENU CMD
+
+  ENTER  Inicia o servidor Argos e abre o jogo
+  C      Altera os idiomas e baixa o modelo Argos direto
+  I/R    Instala ou repara BepInEx + XUnity
+  M      Lista modelos instalados
+  D      Mostra o diagnostico do jogo
+  Q      Sai
+
+COMANDOS
+
+  lt.exe diagnose       mostra runtime, arquitetura e arquivos detectados
+  lt.exe install        instala o modulo detectado automaticamente
+  lt.exe config         escolhe idiomas e baixa o modelo Argos
+  lt.exe config en pt-BR
+                        baixa/ativa diretamente o par informado
+  lt.exe models         lista os modelos instalados
+  lt.exe server         sobe somente o servidor local
+
+O jogo deve ser iniciado pelo lt.exe ou pelo start_translation.bat para
+garantir que o servidor local esteja ativo. Jogos com anti-cheat podem
+bloquear BepInEx; nesse caso nao tente contornar a protecao.
+
+O catalogo atual oferece pares Argos diretos. Se um par nao existir, o
+launcher informa o erro e mantem a configuracao anterior.
+
+BUILD DO PROJETO
+
+  python build_uat_unity.py
+
+O resultado fica em dist/UAT-Unity/ e nao exige Python no computador final.
+=====================================================================

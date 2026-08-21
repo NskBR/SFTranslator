@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SFTranslator",
+  "version": "0.1.0",
+  "identifier": "com.uat.desktop",
+  "build": { "beforeDevCommand": "npm run dev", "devUrl": "http://localhost:1420", "beforeBuildCommand": "npm run build", "frontendDist": "../dist" },
+  "app": {
+    "windows": [{ "title": "SFTranslator", "width": 1104, "height": 611, "minWidth": 1104, "minHeight": 611, "resizable": true, "decorations": false, "transparent": false, "backgroundColor": "#0b0d12", "center": true }],
+    "security": { "csp": null }
+  },
+  "bundle": { "active": true, "targets": "all", "icon": [] }
+}

@@ -1,0 +1,26 @@
+[package]
+name = "uat-desktop"
+version = "0.1.0"
+description = "Gerenciador unificado dos tradutores UAT"
+authors = ["UAT"]
+edition = "2021"
+
+[lib]
+name = "uat_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+zip = { version = "2.4", default-features = false, features = ["deflate"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-icons = "0.4"
