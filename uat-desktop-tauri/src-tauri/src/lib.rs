@@ -100,6 +100,56 @@ fn native_game_path(path: &Path) -> PathBuf {
     }
 }
 
+fn cache_component(value: &str) -> String {
+    let normalized: String = value
+        .trim()
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if normalized.is_empty() { "unknown".into() } else { normalized }
+}
+
+fn renpy_cache_pair(game: &Game) -> String {
+    format!(
+        "{}_{}",
+        cache_component(&game.source_language),
+        cache_component(&game.target_language)
+    )
+}
+
+fn game_root(game: &Game) -> Result<PathBuf, String> {
+    native_game_path(Path::new(&game.executable_path))
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or("Pasta do jogo inválida.".into())
+}
+
+fn unity_cache_language(code: &str) -> String {
+    match code.trim().to_ascii_lowercase().as_str() {
+        "pb" | "pt-br" | "pt_br" => "pt-BR".into(),
+        value if value.is_empty() => "unknown".into(),
+        value => value.into(),
+    }
+}
+
+fn game_cache_directory(game: &Game) -> Result<PathBuf, String> {
+    let root = game_root(game)?;
+    if game.engine == "Unity" {
+        Ok(root
+            .join("BepInEx/Translation")
+            .join(unity_cache_language(&game.target_language))
+            .join("Text"))
+    } else {
+        Ok(root.join("uat/caches"))
+    }
+}
+
 #[cfg(not(windows))]
 fn native_game_path(path: &Path) -> PathBuf {
     path.to_path_buf()
@@ -411,6 +461,50 @@ fn configure_game(
 }
 
 #[tauri::command]
+fn open_game_cache(app: AppHandle, game_id: String) -> Result<(), String> {
+    let game = load_games(&app)?
+        .into_iter()
+        .find(|game| game.id == game_id)
+        .ok_or("Jogo não encontrado.")?;
+    let directory = game_cache_directory(&game)?;
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    #[cfg(windows)]
+    Command::new("explorer.exe")
+        .arg(&directory)
+        .spawn()
+        .map_err(|error| format!("Não foi possível abrir a pasta do cache: {error}"))?;
+    #[cfg(not(windows))]
+    return Err("Abrir a pasta do cache está disponível apenas no Windows.".into());
+    Ok(())
+}
+
+#[tauri::command]
+fn clear_game_cache(app: AppHandle, game_id: String) -> Result<(), String> {
+    let game = load_games(&app)?
+        .into_iter()
+        .find(|game| game.id == game_id)
+        .ok_or("Jogo não encontrado.")?;
+    let directory = game_cache_directory(&game)?;
+    if game.engine == "Unity" {
+        if directory.is_dir() {
+            fs::remove_dir_all(&directory).map_err(|error| error.to_string())?;
+        }
+        return Ok(());
+    }
+
+    let pair = renpy_cache_pair(&game);
+    for file in [
+        directory.join(format!("uat_cache_{pair}.json")),
+        directory.join(format!("uat_words_{pair}.json")),
+    ] {
+        if file.is_file() {
+            fs::remove_file(file).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn delete_model(app: AppHandle, model_id: String) -> Result<(), String> {
     let root = project_root().ok_or("Pasta dos motores não encontrada.")?;
     let packages = root.join("uat-renpy/models/argos-translate/packages");
@@ -668,8 +762,7 @@ fn copy_renpy_tree(source: &Path, destination: &Path) -> Result<(), String> {
 }
 
 fn install_renpy_hook(engine_root: &Path, game: &Game, app: &AppHandle) -> Result<(), String> {
-    let executable = native_game_path(Path::new(&game.executable_path));
-    let game_root = executable.parent().ok_or("Pasta do jogo inválida.")?;
+    let game_root = game_root(game)?;
     session_log(
         app,
         "system",
@@ -696,8 +789,28 @@ fn install_renpy_hook(engine_root: &Path, game: &Game, app: &AppHandle) -> Resul
         .unwrap_or_else(|| serde_json::json!({}));
     config["provider"] = serde_json::json!("local");
     config["show_console"] = serde_json::json!(false);
+    let flow_is_unchanged = config["source_language"].as_str() == Some(game.source_language.as_str())
+        && config["target_language"].as_str() == Some(game.target_language.as_str());
     config["source_language"] = serde_json::json!(game.source_language);
     config["target_language"] = serde_json::json!(game.target_language);
+    let cache_pair = renpy_cache_pair(game);
+    fs::create_dir_all(game_root.join("uat/caches")).map_err(|error| error.to_string())?;
+    if flow_is_unchanged {
+        for (config_key, legacy_name, new_name) in [
+            ("cache_file", "uat_cache.json", format!("uat_cache_{cache_pair}.json")),
+            ("words_file", "uat_words.json", format!("uat_words_{cache_pair}.json")),
+        ] {
+            if config[config_key].as_str() == Some(legacy_name) {
+                let legacy_path = game_root.join("uat").join(legacy_name);
+                let new_path = game_root.join("uat/caches").join(new_name);
+                if legacy_path.is_file() && !new_path.exists() {
+                    fs::rename(legacy_path, new_path).map_err(|error| error.to_string())?;
+                }
+            }
+        }
+    }
+    config["cache_file"] = serde_json::json!(format!("caches/uat_cache_{cache_pair}.json"));
+    config["words_file"] = serde_json::json!(format!("caches/uat_words_{cache_pair}.json"));
     if !config["local"].is_object() {
         config["local"] = serde_json::json!({});
     }
@@ -1155,6 +1268,8 @@ pub fn run() {
             add_game,
             remove_game,
             configure_game,
+            open_game_cache,
+            clear_game_cache,
             delete_model,
             download_model,
             launch_game,

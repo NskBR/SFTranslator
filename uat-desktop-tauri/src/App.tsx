@@ -5,7 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { confirm, open } from "@tauri-apps/plugin-dialog";
 import logo from "./assets/sftranslator-logo-v2.png";
 import {
-  Activity, Box, ChevronLeft, ChevronRight, CircleHelp, Download, Gamepad2,
+  Activity, Box, ChevronLeft, ChevronRight, CircleHelp, Download, Eraser, FolderOpen, Gamepad2,
   Languages, LayoutGrid, Library, List, Maximize2, Minus, Play, Plus, Search,
   Settings, Trash2, Wrench, X, Pencil
 } from "lucide-react";
@@ -205,6 +205,18 @@ function App() {
     } catch (e) { setToast(String(e)); }
   };
 
+  const openGameCache = async (game: Game) => {
+    try { await invoke("open_game_cache", { gameId: game.id }); }
+    catch (e) { setToast(String(e)); }
+  };
+
+  const clearGameCache = async (game: Game) => {
+    const flow = `${game.sourceLanguage.toUpperCase()} → ${game.targetLanguage.toUpperCase()}`;
+    if (!await confirm(`As traduções aprendidas para ${flow} serão removidas. Os modelos não serão apagados.`, { title: `Limpar cache de “${game.name}”?`, kind: "warning" })) return;
+    try { await invoke("clear_game_cache", { gameId: game.id }); setToast("Cache de tradução limpo para este fluxo."); }
+    catch (e) { setToast(String(e)); }
+  };
+
   const filtered = useMemo(() => games.filter(game => {
     const matchesFilter = filter === "Todos" || game.engine === filter;
     return matchesFilter && game.name.toLowerCase().includes(query.toLowerCase());
@@ -248,12 +260,14 @@ function App() {
       </aside>
       <main>
         {page === "Biblioteca" && (selectedGame
-          ? <GameDetails game={selectedGame} models={models} onBack={() => setSelectedGame(undefined)} onRemove={() => removeGame(selectedGame)} onSave={configureGame}/>
+          ? <GameDetails game={selectedGame} models={models} onBack={() => setSelectedGame(undefined)} onRemove={() => removeGame(selectedGame)} onSave={configureGame} onOpenCache={() => openGameCache(selectedGame)} onClearCache={() => clearGameCache(selectedGame)}/>
           : <LibraryPage games={filtered} filter={filter} setFilter={setFilter} query={query} setQuery={setQuery} onAddGame={beginAddGame} onSelect={setSelectedGame} onLaunch={launchGame}/>)} 
         {page === "Adicionar jogo" && <Wizard existingGame={selectedGame} models={models} onSave={configureGame}/>} 
         {page === "Modelos" && <Models models={models} games={games} onOpenGame={openGameDetails} onDelete={deleteModel} onDownload={downloadModel}/>} 
         {page === "Downloads" && <DownloadsPage tasks={downloads}/>} 
-        {page === "Sessão" && sessionGame && <SessionPage game={sessionGame} lines={sessionLines} running={sessionRunning} onBack={() => setPage("Biblioteca")}/>} 
+        {page === "Sessão" && sessionGame && (
+          <SessionPage game={sessionGame} lines={sessionLines} running={sessionRunning} onBack={() => setPage("Biblioteca")} onRestart={() => launchGame(sessionGame)}/>
+        )}
         {page === "Diagnósticos" && <Diagnostics health={health}/>} 
         {page === "Configurações" && <SettingsPage/>}
         {page === "Sobre" && <EmptyPage icon={Languages} title="SFTranslator" text="Uma biblioteca universal de tradução para jogos Ren'Py e Unity."/>}
@@ -293,7 +307,7 @@ function LibraryPage({ games, filter, setFilter, query, setQuery, onAddGame, onS
   </div>;
 }
 
-function GameDetails({ game, models, onBack, onRemove, onSave }: { game: Game; models:TranslationModel[]; onBack:()=>void; onRemove:()=>void; onSave:(game:Game,source:string,target:string)=>Promise<void> }) {
+function GameDetails({ game, models, onBack, onRemove, onSave, onOpenCache, onClearCache }: { game: Game; models:TranslationModel[]; onBack:()=>void; onRemove:()=>void; onSave:(game:Game,source:string,target:string)=>Promise<void>; onOpenCache:()=>void; onClearCache:()=>void }) {
   const sources=useMemo(()=>Array.from(new Map(models.map(model=>[model.fromCode,{code:model.fromCode,name:model.fromName}])).values()).sort((a,b)=>a.name.localeCompare(b.name)),[models]);
   const preferredSource=game.sourceLanguage||game.detectedLanguage||sources[0]?.code||"";
   const [source,setSource]=useState(sources.some(item=>item.code===preferredSource)?preferredSource:(game.detectedLanguage||sources[0]?.code||""));
@@ -316,7 +330,7 @@ function GameDetails({ game, models, onBack, onRemove, onSave }: { game: Game; m
       <button className="primary" disabled={!selectedModel||saving} onClick={save}><Pencil size={15}/>{saving?"Salvando…":"Salvar configuração"}</button>
     </section>
     <section className="game-config-panel">
-      <div className="game-file-card"><span>EXECUTÁVEL DO JOGO</span><strong>{executableName}</strong><code title={game.executablePath}>{gameDirectory}</code><div className="game-file-facts"><div><span>Motor</span><b>{game.engine}</b></div><div><span>Runtime</span><b>{game.runtime||"Padrão"}</b></div><div><span>Arquitetura</span><b>{game.architecture||"Automática"}</b></div><div><span>Estado</span><b>{game.status}</b></div></div><div className="game-integration-row"><span>Integração instalada no jogo</span><b>{game.integrationStatus||"Será verificada ao iniciar"}</b></div></div>
+      <div className="game-file-card"><span>EXECUTÁVEL DO JOGO</span><strong>{executableName}</strong><code title={game.executablePath}>{gameDirectory}</code><div className="game-file-facts"><div><span>Motor</span><b>{game.engine}</b></div><div><span>Runtime</span><b>{game.runtime||"Padrão"}</b></div><div><span>Arquitetura</span><b>{game.architecture||"Automática"}</b></div><div><span>Estado</span><b>{game.status}</b></div></div><div className="game-integration-row"><span>Integração instalada no jogo</span><b>{game.integrationStatus||"Será verificada ao iniciar"}</b></div><div className="game-cache-actions"><div><span>Cache de tradução</span><b>{game.engine === "Ren'Py" ? `${source.toUpperCase()} → ${target.toUpperCase()} separado` : `XUnity · ${target.toUpperCase()}`}</b></div><button className="secondary" onClick={onOpenCache}><FolderOpen size={15}/>Abrir</button><button className="secondary" onClick={onClearCache}><Eraser size={15}/>Limpar</button></div></div>
       <div className="game-flow-editor"><div className="editor-title"><div><span>TRADUÇÃO</span><h2>Configuração do jogo</h2></div><span className={`pill ${game.modelInstalled?"success":"neutral"}`}>{game.modelInstalled?"Modelo instalado":"Modelo necessário"}</span></div><div className="detected-language"><Languages size={18}/><div><b>Idioma detectado: {(game.detectedLanguage||"?").toUpperCase()}</b><span>{Math.round((game.languageConfidence||0)*100)}% de confiança na análise</span></div></div><div className="form-row"><label>Idioma original<select value={source} onChange={event=>setSource(event.target.value)}>{sources.map(item=><option key={item.code} value={item.code}>{item.name}</option>)}</select></label><label>Destino disponível<select value={target} onChange={event=>setTarget(event.target.value)}>{destinations.map(model=><option key={model.id} value={model.toCode}>{model.toName}</option>)}</select></label></div>{installedModels.length>0&&<div className="installed-flow-picker compact"><div><b>Modelos instalados</b><span>Selecione um par pronto.</span></div><div className="installed-flow-list">{installedModels.map(model=><button key={model.id} className={source===model.fromCode&&target===model.toCode?"selected":""} onClick={()=>{setSource(model.fromCode);setTarget(model.toCode);}}><span>{model.fromCode.toUpperCase()}</span><ChevronRight size={12}/><span>{model.toCode.toUpperCase()}</span><small className="flow-flags" aria-label={`${model.fromName} para ${model.toName}`}><LanguageFlag code={model.fromCode} name={model.fromName}/><ChevronRight size={10}/><LanguageFlag code={model.toCode} name={model.toName}/></small></button>)}</div></div>}<div className="flow-result"><span>{source.toUpperCase()} → {target.toUpperCase()}</span><b>{selectedModel?.installed?"Pronto para usar":selectedModel?"Será baixado ao salvar":"Fluxo indisponível"}</b></div></div>
     </section>
     <footer className="game-config-danger"><div><h3>Remover jogo</h3><p>Remove somente o cadastro do SFTranslator.</p></div><div className="danger-facts"><span>Arquivos preservados</span><span>Modelo preservado</span></div><button className="danger-button" onClick={onRemove}><Trash2 size={16}/>Remover da biblioteca</button></footer>
@@ -369,7 +383,7 @@ function Diagnostics({ health }: { health: EngineHealth[] }) { return <div class
 function Check({label,value}:{label:string;value:boolean}) { return <div className="check"><span>{label}</span><b className={value?"good":"muted"}>{value?"Encontrado":"Não confirmado"}</b></div>; }
 function SettingsPage() { return <div className="page"><PageHeading eyebrow="PREFERÊNCIAS" title="Configurações" text="A nova base manterá modelos e dados fora das pastas dos jogos."/><section className="settings-card"><div><h3>Tema</h3><p>Interface escura</p><span className="switch on"><i/></span></div><div><h3>Idioma da interface</h3><p>Português (Brasil)</p><button className="secondary">Alterar</button></div><div><h3>Modo avançado</h3><p>Exibe runtime, arquitetura e logs técnicos</p><span className="switch"><i/></span></div></section></div>; }
 function DownloadsPage({tasks}:{tasks:DownloadTask[]}) { return <div className="page"><PageHeading eyebrow="OPERAÇÕES" title="Downloads" text="Acompanhe modelos e componentes sem bloquear o restante do aplicativo."/>{tasks.length?<section className="downloads-list">{tasks.map(task=><article key={task.id} className={task.status}><div className="download-status">{task.status==="baixando"?<span className="spinner"/>:task.status==="concluído"?<Activity size={19}/>:<X size={19}/>}</div><div className="download-copy"><h3>{task.name}</h3><p>{task.detail}</p>{task.status==="baixando"&&<div className="progress-track"><i style={{width:`${task.progress}%`}}/></div>}</div><span className="download-label">{task.status}</span></article>)}</section>:<section className="empty-card compact"><div className="panel-icon"><Download size={24}/></div><h2>Nenhum download por enquanto</h2><p>Os modelos iniciados em Modelos Universais aparecerão aqui.</p></section>}</div>; }
-function SessionPage({game,lines,running,onBack}:{game:Game;lines:SessionLine[];running:boolean;onBack:()=>void}) {
+function SessionPage({game,lines,running,onBack,onRestart}:{game:Game;lines:SessionLine[];running:boolean;onBack:()=>void;onRestart:()=>void}) {
   const outputRef=useRef<HTMLDivElement>(null);
   const followOutput=useRef(true);
 
@@ -395,7 +409,7 @@ function SessionPage({game,lines,running,onBack}:{game:Game;lines:SessionLine[];
   };
 
   return <div className="session-page">
-    <header><button className="back-button" onClick={onBack}><ChevronLeft size={15}/>Biblioteca</button><div><span className={`session-dot ${running?"live":""}`}/><b>{game.name}</b><small>{running?"tradução em tempo real":"jogo encerrado"}</small></div></header>
+    <header><button className="back-button" onClick={onBack}><ChevronLeft size={15}/>Biblioteca</button><div className="session-actions"><div><span className={`session-dot ${running?"live":""}`}/><b>{game.name}</b><small>{running?"tradução em tempo real":"jogo encerrado"}</small></div>{!running&&<button className="primary session-restart" onClick={onRestart}><Play size={15}/>Iniciar novamente</button>}</div></header>
     <section className="terminal">
       <div className="terminal-head"><span>SFTranslator runtime</span><span>{game.sourceLanguage.toUpperCase()} → {game.targetLanguage.toUpperCase()}</span></div>
       <div className="terminal-output" ref={outputRef} onScroll={updateScrollFollow}>{lines.length?lines.map((line,index)=><p key={index} className={line.kind}><i>{line.kind==="error"?"!":line.kind==="system"?"›":"·"}</i>{line.text}</p>):<p className="system"><i>›</i>Aguardando saída do motor de tradução…</p>}</div>

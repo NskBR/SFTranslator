@@ -412,6 +412,11 @@ main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: colu
 .game-file-facts b { margin-top: 3px; overflow: hidden; color: var(--text-2); font-size: var(--font-small); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .game-integration-row { margin-top: auto; padding: 9px 10px; border-radius: 9px; background: var(--panel); }
 .game-integration-row b { margin-top: 4px; color: var(--text-2); font-size: var(--font-small); font-weight: 500; line-height: 1.35; }
+.game-cache-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 7px; margin-top: 9px; }
+.game-cache-actions > div { min-width: 0; }
+.game-cache-actions span { display: block; color: var(--muted); font-size: var(--font-label); }
+.game-cache-actions b { display: block; overflow: hidden; margin-top: 2px; color: var(--text-2); font-size: var(--font-small); text-overflow: ellipsis; white-space: nowrap; }
+.game-cache-actions .secondary { min-height: 30px; padding: 0 8px; font-size: var(--font-label); }
 .game-flow-editor { display: flex; flex-direction: column; overflow: hidden; }
 .editor-title { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .editor-title h2 { margin: 3px 0 0; font-size: var(--font-title); }
@@ -478,6 +483,9 @@ main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: colu
 .session-page { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 16px 18px 12px; }
 .session-page > header { height: 38px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .session-page header > div { display: flex; align-items: center; gap: 7px; }
+.session-page header > .session-actions { gap: 14px; }
+.session-page header > .session-actions > div { display: flex; align-items: center; gap: 7px; }
+.session-restart { min-height: 32px; padding: 0 11px; font-size: var(--font-label); }
 .session-page header small { color: var(--muted); font-size: var(--font-label); }
 .session-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
 .session-dot.live { background: var(--ready); box-shadow: 0 0 8px rgba(16, 185, 129, .5); }
