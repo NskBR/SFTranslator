@@ -3,10 +3,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { confirm, open } from "@tauri-apps/plugin-dialog";
+import "country-flag-icons/3x2/flags.css";
 import logo from "./assets/sftranslator-logo-v2.png";
 import {
-  Activity, Box, ChevronLeft, ChevronRight, CircleHelp, Download, Eraser, FolderOpen, Gamepad2,
-  Languages, LayoutGrid, Library, List, Maximize2, Minus, Play, Plus, Search,
+  Activity, Box, ChevronLeft, ChevronRight, CircleHelp, Download, Gamepad2,
+  ChevronDown, Languages, LayoutGrid, Library, List, Maximize2, Minus, Play, Plus, Search,
   Settings, Trash2, Wrench, X, Pencil
 } from "lucide-react";
 import type { EngineHealth, Game, TranslationModel } from "./types";
@@ -24,28 +25,30 @@ const COMPACT_SIDEBAR_WIDTH = 68;
 const MIN_SIDEBAR_WIDTH = 140;
 const MAX_SIDEBAR_WIDTH = 260;
 
-const LANGUAGE_FLAGS:Record<string,string>={
-  ar:"🇸🇦",az:"🇦🇿",bg:"🇧🇬",bn:"🇧🇩",ca:"🇪🇸",cs:"🇨🇿",da:"🇩🇰",de:"🇩🇪",
-  el:"🇬🇷",en:"🇺🇸",eo:"🌐",es:"🇪🇸",et:"🇪🇪",eu:"🇪🇸",fa:"🇮🇷",fi:"🇫🇮",
-  fr:"🇫🇷",ga:"🇮🇪",gl:"🇪🇸",he:"🇮🇱",hi:"🇮🇳",hu:"🇭🇺",id:"🇮🇩",it:"🇮🇹",
-  ja:"🇯🇵",ko:"🇰🇷",ky:"🇰🇬",lt:"🇱🇹",lv:"🇱🇻",ms:"🇲🇾",nb:"🇳🇴",nl:"🇳🇱",
-  pb:"🇧🇷",pl:"🇵🇱",pt:"🇵🇹",ro:"🇷🇴",ru:"🇷🇺",sk:"🇸🇰",sl:"🇸🇮",sq:"🇦🇱",
-  sv:"🇸🇪",sw:"🇰🇪",th:"🇹🇭",tl:"🇵🇭",tr:"🇹🇷",uk:"🇺🇦",ur:"🇵🇰",vi:"🇻🇳",
-  zh:"🇨🇳",zt:"🇹🇼"
-};
-const languageFlag=(code:string)=>LANGUAGE_FLAGS[code.toLowerCase()]||"🌐";
-const LOCAL_FLAG_STYLES:Record<string,string>={en:"us",pb:"br",pt:"pt",ja:"jp"};
-function FlagSvg({flag}:{flag:string}) {
-  if(flag==="us") return <svg viewBox="0 0 30 20" aria-hidden="true"><path fill="#fff" d="M0 0h30v20H0z"/><path fill="#b22234" d="M0 0h30v1.54H0zm0 3.08h30v1.54H0zm0 3.08h30v1.54H0zm0 3.08h30v1.54H0zm0 3.08h30v1.54H0zm0 3.08h30v1.54H0zm0 3.08h30v1.54H0z"/><path fill="#3c3b6e" d="M0 0h12v10.77H0z"/></svg>;
-  if(flag==="br") return <svg viewBox="0 0 30 20" aria-hidden="true"><path fill="#009b3a" d="M0 0h30v20H0z"/><path fill="#ffdf00" d="m15 2 12 8-12 8L3 10z"/><circle cx="15" cy="10" r="4.5" fill="#002776"/><path d="M11 9.5c2.5-1.2 5.6-1 8 .4" fill="none" stroke="#fff" strokeWidth=".8"/></svg>;
-  if(flag==="jp") return <svg viewBox="0 0 30 20" aria-hidden="true"><path fill="#fff" d="M0 0h30v20H0z"/><circle cx="15" cy="10" r="5.3" fill="#bc002d"/></svg>;
-  return <svg viewBox="0 0 30 20" aria-hidden="true"><path fill="#046a38" d="M0 0h12v20H0z"/><path fill="#da291c" d="M12 0h18v20H12z"/><circle cx="12" cy="10" r="4" fill="none" stroke="#f5c542" strokeWidth="1.2"/></svg>;
-}
+const LANGUAGE_COUNTRIES:Record<string,string>={ar:"SA",az:"AZ",bg:"BG",bn:"BD",ca:"ES",cs:"CZ",da:"DK",de:"DE",el:"GR",en:"US",es:"ES",et:"EE",eu:"ES",fa:"IR",fi:"FI",fr:"FR",ga:"IE",gl:"ES",he:"IL",hi:"IN",hu:"HU",id:"ID",it:"IT",ja:"JP",ko:"KR",ky:"KG",lt:"LT",lv:"LV",ms:"MY",nb:"NO",nl:"NL",pb:"BR",pl:"PL",pt:"PT",ro:"RO",ru:"RU",sk:"SK",sl:"SI",sq:"AL",sv:"SE",sw:"KE",th:"TH",tl:"PH",tr:"TR",uk:"UA",ur:"PK",vi:"VN",zh:"CN",zt:"TW"};
 function LanguageFlag({code,name}:{code:string;name:string}) {
-  const style=LOCAL_FLAG_STYLES[code.toLowerCase()];
-  return style
-    ? <span className="flag-icon" role="img" aria-label={name} title={name}><FlagSvg flag={style}/></span>
-    : <span className="flow-flag" role="img" aria-label={name} title={name}>{languageFlag(code)}</span>;
+  const country=LANGUAGE_COUNTRIES[code.toLowerCase()];
+  return country
+    ? <span className={`flag:${country} flag-icon`} role="img" aria-label={name} title={name}/>
+    : <span className="flag-code" role="img" aria-label={name} title={name}>{code.toUpperCase()}</span>;
+}
+
+type SelectOption = { value: string; label: string };
+function UiSelect({ value, options, onChange, ariaLabel }: { value: string; options: SelectOption[]; onChange: (value: string) => void; ariaLabel: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const selectRef = useRef<HTMLDivElement>(null);
+  const selected = options.find(option => option.value === value);
+  useEffect(() => {
+    const close = (event: MouseEvent) => { if (!selectRef.current?.contains(event.target as Node)) setExpanded(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setExpanded(false); };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", escape); };
+  }, []);
+  return <div className={`ui-select ${expanded ? "open" : ""}`} ref={selectRef}>
+    <button type="button" className="ui-select-trigger" aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={expanded} onClick={() => setExpanded(open => !open)}><span>{selected?.label || "Selecione"}</span><ChevronDown size={16}/></button>
+    {expanded && <div className="ui-select-menu" role="listbox" aria-label={ariaLabel}>{options.map(option => <button type="button" key={option.value} role="option" aria-selected={option.value === value} className={option.value === value ? "selected" : ""} onClick={() => { onChange(option.value); setExpanded(false); }}><span>{option.label}</span>{option.value === value && <i>Selecionado</i>}</button>)}</div>}
+  </div>;
 }
 
 function App() {
@@ -59,6 +62,7 @@ function App() {
   const [selectedGame, setSelectedGame] = useState<Game>();
   const [downloads, setDownloads] = useState<DownloadTask[]>([]);
   const [sessionGame, setSessionGame] = useState<Game>();
+  const [gamePendingDeletion, setGamePendingDeletion] = useState<Game>();
   const [sessionLines, setSessionLines] = useState<SessionLine[]>([]);
   const [sessionRunning, setSessionRunning] = useState(false);
   const sidebarRef = useRef<HTMLElement>(null);
@@ -196,7 +200,6 @@ function App() {
   };
 
   const removeGame = async (game: Game) => {
-    if (!await confirm(`Os arquivos do jogo não serão apagados.`, { title: `Remover “${game.name}”?`, kind: "warning" })) return;
     try {
       await invoke("remove_game", { gameId: game.id });
       setSelectedGame(undefined);
@@ -206,7 +209,7 @@ function App() {
   };
 
   const openGameCache = async (game: Game) => {
-    try { await invoke("open_game_cache", { gameId: game.id }); }
+    try { await invoke("open_game_folder", { gameId: game.id }); }
     catch (e) { setToast(String(e)); }
   };
 
@@ -216,6 +219,45 @@ function App() {
     try { await invoke("clear_game_cache", { gameId: game.id }); setToast("Cache de tradução limpo para este fluxo."); }
     catch (e) { setToast(String(e)); }
   };
+
+  useEffect(() => {
+    const pickers = Array.from(document.querySelectorAll<HTMLElement>(".installed-flow-list"));
+    const cleanups: Array<() => void> = [];
+    pickers.forEach(list => {
+      const flowButtons = Array.from(list.querySelectorAll<HTMLButtonElement>(":scope > button"));
+      const hiddenFlows = flowButtons.slice(2);
+      if (!hiddenFlows.length) return;
+
+      const dropdown = document.createElement("div");
+      dropdown.className = "installed-flow-dropdown";
+      const trigger = document.createElement("button");
+      trigger.type = "button";
+      trigger.className = "installed-flow-dropdown-trigger";
+      trigger.textContent = `Outros modelos (${hiddenFlows.length})`;
+      const menu = document.createElement("div");
+      menu.className = "installed-flow-dropdown-menu";
+
+      hiddenFlows.forEach(flow => {
+        const labels = Array.from(flow.querySelectorAll("span")).map(item => item.textContent?.trim()).filter(Boolean);
+        const option = document.createElement("button");
+        option.type = "button";
+        option.className = "installed-flow-dropdown-option";
+        const flags = flow.querySelector(".flow-flags")?.cloneNode(true);
+        if (flags) option.append(flags);
+        const label = document.createElement("span");
+        label.textContent = labels.length >= 2 ? `${labels[0]} → ${labels[1]}` : "Fluxo instalado";
+        option.append(label);
+        option.addEventListener("click", () => { flow.click(); menu.classList.remove("open"); });
+        menu.append(option);
+      });
+
+      trigger.addEventListener("click", () => menu.classList.toggle("open"));
+      dropdown.append(trigger, menu);
+      list.append(dropdown);
+      cleanups.push(() => dropdown.remove());
+    });
+    return () => cleanups.forEach(cleanup => cleanup());
+  }, [page, selectedGame?.id, models]);
 
   const filtered = useMemo(() => games.filter(game => {
     const matchesFilter = filter === "Todos" || game.engine === filter;
@@ -260,7 +302,7 @@ function App() {
       </aside>
       <main>
         {page === "Biblioteca" && (selectedGame
-          ? <GameDetails game={selectedGame} models={models} onBack={() => setSelectedGame(undefined)} onRemove={() => removeGame(selectedGame)} onSave={configureGame} onOpenCache={() => openGameCache(selectedGame)} onClearCache={() => clearGameCache(selectedGame)}/>
+          ? <GameDetails game={selectedGame} models={models} onBack={() => setSelectedGame(undefined)} onRemove={() => setGamePendingDeletion(selectedGame)} onSave={configureGame} onOpenCache={() => openGameCache(selectedGame)} onClearCache={() => clearGameCache(selectedGame)}/>
           : <LibraryPage games={filtered} filter={filter} setFilter={setFilter} query={query} setQuery={setQuery} onAddGame={beginAddGame} onSelect={setSelectedGame} onLaunch={launchGame}/>)} 
         {page === "Adicionar jogo" && <Wizard existingGame={selectedGame} models={models} onSave={configureGame}/>} 
         {page === "Modelos" && <Models models={models} games={games} onOpenGame={openGameDetails} onDelete={deleteModel} onDownload={downloadModel}/>} 
@@ -274,8 +316,15 @@ function App() {
         <footer className="context-bar"><span><Activity size={14}/>{contextText}</span><b>{sessionRunning ? "Sessão ativa" : "Pronto"}</b></footer>
       </main>
     </div>
+    {gamePendingDeletion && (
+      <DeleteGameModal game={gamePendingDeletion} onCancel={() => setGamePendingDeletion(undefined)} onConfirm={() => { const game = gamePendingDeletion; setGamePendingDeletion(undefined); removeGame(game); }}/>
+    )}
     {toast && <div className="toast" onClick={() => setToast(undefined)}>{toast}<X size={15}/></div>}
   </div>;
+}
+
+function DeleteGameModal({ game, onCancel, onConfirm }: { game: Game; onCancel: () => void; onConfirm: () => void }) {
+  return <div className="modal-backdrop delete-game-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onCancel(); }}><section className="delete-game-modal" role="dialog" aria-modal="true" aria-labelledby="delete-game-title"><button className="modal-close" onClick={onCancel} aria-label="Fechar"><X size={18}/></button><div className="delete-game-icon"><Trash2 size={23}/></div><span className="eyebrow">REMOVER DA BIBLIOTECA</span><h2 id="delete-game-title">Remover “{game.name}”?</h2><p>Somente o cadastro no SFTranslator será removido. O executável, os arquivos do jogo e os modelos universais permanecem intactos.</p><div className="delete-game-path"><span>Executável preservado</span><b>{game.executablePath}</b></div><footer><button className="secondary" onClick={onCancel}>Cancelar</button><button className="danger-button" onClick={onConfirm}><Trash2 size={16}/>Remover jogo</button></footer></section></div>;
 }
 
 function PageHeading({ eyebrow, title, text, action }: { eyebrow?: string; title: string; text: string; action?: React.ReactNode }) {
@@ -296,7 +345,7 @@ function LibraryPage({ games, filter, setFilter, query, setQuery, onAddGame, onS
             <div className="game-info">
               <div className="game-title"><div><h3>{game.name}</h3><span className="engine-tag">{game.engine}</span></div><p>{game.executablePath}</p></div>
               <div className="game-meta">
-                <div className="language-pair" title="Fluxo de tradução">{game.modelInstalled?<><span>{game.sourceLanguage.toUpperCase()}</span><ChevronRight size={12}/><span>{game.targetLanguage.toUpperCase()}</span></>:<span>Sem modelo</span>}</div>
+                <div className="language-pair" title="Fluxo de tradução">{game.modelInstalled?<><LanguageFlag code={game.sourceLanguage} name={game.sourceLanguage.toUpperCase()}/><ChevronRight size={12}/><LanguageFlag code={game.targetLanguage} name={game.targetLanguage.toUpperCase()}/></>:<span>Sem modelo</span>}</div>
                 <div className="status"><i className={`dot ${game.status === "Pronto" ? "ok" : "warn"}`}/>{game.status}</div>
               </div>
             </div>
@@ -327,13 +376,13 @@ function GameDetails({ game, models, onBack, onRemove, onSave, onOpenCache, onCl
     <section className="game-config-identity">
       <div className="game-identity-primary"><div className={`details-icon game-cover ${game.engine === "Unity"?"unity":"renpy"}`}>{game.iconData?<img src={game.iconData} alt=""/>:<Gamepad2 size={38}/>}</div><div><span className="eyebrow">{game.engine.toUpperCase()}</span><h1>{game.name}</h1><p>{game.runtime||game.engine}{game.architecture?` · ${game.architecture}`:""} · <b>{game.status}</b></p></div></div>
       <div className="game-summary-strip"><div><span>Idioma detectado</span><b>{(game.detectedLanguage||"?").toUpperCase()} <small>{Math.round((game.languageConfidence||0)*100)}%</small></b></div><div><span>Fluxo selecionado</span><b>{source.toUpperCase()||"—"} <i>→</i> {target.toUpperCase()||"—"}</b></div><div><span>Modelo universal</span><b className={selectedModel?.installed?"summary-ready":""}>{selectedModel?.installed?"Instalado":"Necessário"}</b></div></div>
-      <button className="primary" disabled={!selectedModel||saving} onClick={save}><Pencil size={15}/>{saving?"Salvando…":"Salvar configuração"}</button>
+      <button className="primary" disabled={!selectedModel||saving} onClick={save}>{saving?"Salvando…":"Salvar configuração"}</button>
     </section>
     <section className="game-config-panel">
-      <div className="game-file-card"><span>EXECUTÁVEL DO JOGO</span><strong>{executableName}</strong><code title={game.executablePath}>{gameDirectory}</code><div className="game-file-facts"><div><span>Motor</span><b>{game.engine}</b></div><div><span>Runtime</span><b>{game.runtime||"Padrão"}</b></div><div><span>Arquitetura</span><b>{game.architecture||"Automática"}</b></div><div><span>Estado</span><b>{game.status}</b></div></div><div className="game-integration-row"><span>Integração instalada no jogo</span><b>{game.integrationStatus||"Será verificada ao iniciar"}</b></div><div className="game-cache-actions"><div><span>Cache de tradução</span><b>{game.engine === "Ren'Py" ? `${source.toUpperCase()} → ${target.toUpperCase()} separado` : `XUnity · ${target.toUpperCase()}`}</b></div><button className="secondary" onClick={onOpenCache}><FolderOpen size={15}/>Abrir</button><button className="secondary" onClick={onClearCache}><Eraser size={15}/>Limpar</button></div></div>
-      <div className="game-flow-editor"><div className="editor-title"><div><span>TRADUÇÃO</span><h2>Configuração do jogo</h2></div><span className={`pill ${game.modelInstalled?"success":"neutral"}`}>{game.modelInstalled?"Modelo instalado":"Modelo necessário"}</span></div><div className="detected-language"><Languages size={18}/><div><b>Idioma detectado: {(game.detectedLanguage||"?").toUpperCase()}</b><span>{Math.round((game.languageConfidence||0)*100)}% de confiança na análise</span></div></div><div className="form-row"><label>Idioma original<select value={source} onChange={event=>setSource(event.target.value)}>{sources.map(item=><option key={item.code} value={item.code}>{item.name}</option>)}</select></label><label>Destino disponível<select value={target} onChange={event=>setTarget(event.target.value)}>{destinations.map(model=><option key={model.id} value={model.toCode}>{model.toName}</option>)}</select></label></div>{installedModels.length>0&&<div className="installed-flow-picker compact"><div><b>Modelos instalados</b><span>Selecione um par pronto.</span></div><div className="installed-flow-list">{installedModels.map(model=><button key={model.id} className={source===model.fromCode&&target===model.toCode?"selected":""} onClick={()=>{setSource(model.fromCode);setTarget(model.toCode);}}><span>{model.fromCode.toUpperCase()}</span><ChevronRight size={12}/><span>{model.toCode.toUpperCase()}</span><small className="flow-flags" aria-label={`${model.fromName} para ${model.toName}`}><LanguageFlag code={model.fromCode} name={model.fromName}/><ChevronRight size={10}/><LanguageFlag code={model.toCode} name={model.toName}/></small></button>)}</div></div>}<div className="flow-result"><span>{source.toUpperCase()} → {target.toUpperCase()}</span><b>{selectedModel?.installed?"Pronto para usar":selectedModel?"Será baixado ao salvar":"Fluxo indisponível"}</b></div></div>
+      <div className="game-file-card"><span>EXECUTÁVEL DO JOGO</span><strong>{executableName}</strong><code title={game.executablePath}>{gameDirectory}</code><div className="game-file-facts"><div><span>Motor</span><b>{game.engine}</b></div><div><span>Runtime</span><b>{game.runtime||"Padrão"}</b></div><div><span>Arquitetura</span><b>{game.architecture||"Automática"}</b></div><div><span>Estado</span><b>{game.status}</b></div></div><div className="game-integration-row"><span>Integração instalada no jogo</span><b>{game.integrationStatus||"Será verificada ao iniciar"}</b></div><div className="game-cache-actions"><div><span>Cache de tradução</span><b>{game.engine === "Ren'Py" ? `${source.toUpperCase()} → ${target.toUpperCase()} separado` : `XUnity · ${target.toUpperCase()}`}</b></div><button className="secondary" onClick={onOpenCache}>Abrir</button><button className="secondary" onClick={onClearCache}>Limpar</button></div></div>
+      <div className="game-flow-editor"><div className="editor-title"><div><span>TRADUÇÃO</span><h2>Configuração do jogo</h2></div><span className={`pill ${game.modelInstalled?"success":"neutral"}`}>{game.modelInstalled?"Modelo instalado":"Modelo necessário"}</span></div><div className="detected-language"><Languages size={18}/><div><b>Idioma detectado: {(game.detectedLanguage||"?").toUpperCase()}</b><span>{Math.round((game.languageConfidence||0)*100)}% de confiança na análise</span></div></div><div className="form-row"><label>Idioma original<UiSelect value={source} options={sources.map(item=>({value:item.code,label:item.name}))} onChange={setSource} ariaLabel="Idioma original"/></label><label>Destino disponível<UiSelect value={target} options={destinations.map(model=>({value:model.toCode,label:model.toName}))} onChange={setTarget} ariaLabel="Destino disponível"/></label></div>{installedModels.length>0&&<div className="installed-flow-picker compact"><div><b>Modelos instalados</b><span>Selecione um par pronto.</span></div><div className="installed-flow-list">{installedModels.map(model=><button key={model.id} className={source===model.fromCode&&target===model.toCode?"selected":""} onClick={()=>{setSource(model.fromCode);setTarget(model.toCode);}}><span>{model.fromCode.toUpperCase()}</span><ChevronRight size={12}/><span>{model.toCode.toUpperCase()}</span><small className="flow-flags" aria-label={`${model.fromName} para ${model.toName}`}><LanguageFlag code={model.fromCode} name={model.fromName}/><ChevronRight size={10}/><LanguageFlag code={model.toCode} name={model.toName}/></small></button>)}</div></div>}<div className="flow-result"><span>{source.toUpperCase()} → {target.toUpperCase()}</span><b>{selectedModel?.installed?"Pronto para usar":selectedModel?"Será baixado ao salvar":"Fluxo indisponível"}</b></div></div>
     </section>
-    <footer className="game-config-danger"><div><h3>Remover jogo</h3><p>Remove somente o cadastro do SFTranslator.</p></div><div className="danger-facts"><span>Arquivos preservados</span><span>Modelo preservado</span></div><button className="danger-button" onClick={onRemove}><Trash2 size={16}/>Remover da biblioteca</button></footer>
+    <footer className="game-config-danger"><div><h3>Remover jogo</h3><p>Remove somente o cadastro do SFTranslator.</p></div><div className="danger-facts"><span>Arquivos preservados</span><span>Modelo preservado</span></div><button className="danger-button" onClick={onRemove}>Remover da biblioteca</button></footer>
   </div>;
 }
 
@@ -355,7 +404,7 @@ function Wizard({ existingGame: game, models, onSave }: { existingGame?:Game; mo
     <div className="wizard-analysis">
       <div className="analysis-head"><div className={`game-cover ${game.engine === "Unity"?"unity":"renpy"}`}>{game.iconData?<img src={game.iconData} alt=""/>:<Gamepad2/>}</div><div><span className="pill neutral">{game.engine}</span><h2>{game.name}</h2><p>{game.runtime} · {game.architecture} · {game.integrationStatus}</p></div></div>
       <div className="confidence"><Languages size={20}/><div><b>Idioma detectado: {(game.detectedLanguage||"?").toUpperCase()}</b><span>Confiabilidade da análise</span></div><strong>{Math.round((game.languageConfidence||0)*100)}%</strong></div>
-      <div className="form-row"><label>Idioma original<select value={source} onChange={e=>setSource(e.target.value)}>{sources.map(item=><option key={item.code} value={item.code}>{item.name}</option>)}</select></label><label>Fluxos disponíveis a partir de {sources.find(item=>item.code===source)?.name||source}<select value={target} onChange={e=>setTarget(e.target.value)}>{destinations.map(model=><option key={model.id} value={model.toCode}>{model.toName}</option>)}</select></label></div>
+      <div className="form-row"><label>Idioma original<UiSelect value={source} options={sources.map(item=>({value:item.code,label:item.name}))} onChange={setSource} ariaLabel="Idioma original"/></label><label>Fluxos disponíveis a partir de {sources.find(item=>item.code===source)?.name||source}<UiSelect value={target} options={destinations.map(model=>({value:model.toCode,label:model.toName}))} onChange={setTarget} ariaLabel="Destino disponível"/></label></div>
       {installedModels.length>0&&<div className="installed-flow-picker"><div><b>Modelos já instalados</b><span>Selecione um par para preencher os dois idiomas.</span></div><div className="installed-flow-list">{installedModels.map(model=><button key={model.id} className={source===model.fromCode&&target===model.toCode?"selected":""} onClick={()=>{setSource(model.fromCode);setTarget(model.toCode);}}><span>{model.fromCode.toUpperCase()}</span><ChevronRight size={12}/><span>{model.toCode.toUpperCase()}</span><small className="flow-flags" aria-label={`${model.fromName} para ${model.toName}`}><LanguageFlag code={model.fromCode} name={model.fromName}/><ChevronRight size={10}/><LanguageFlag code={model.toCode} name={model.toName}/></small></button>)}</div></div>}
       <div className="flow-result"><span>{source.toUpperCase()} → {target.toUpperCase()}</span><b>{selectedModel?.installed?"Modelo instalado":selectedModel?"Disponível para baixar":"Fluxo indisponível"}</b></div>
       <button className="primary wizard-next" disabled={!selectedModel} onClick={()=>selectedModel&&onSave(game,source,target)}>Salvar e continuar<ChevronRight size={16}/></button>
@@ -366,7 +415,28 @@ function Wizard({ existingGame: game, models, onSave }: { existingGame?:Game; mo
 function Models({ models, games, onOpenGame, onDelete, onDownload }: { models: TranslationModel[]; games:Game[]; onOpenGame:(game:Game)=>void; onDelete:(model:TranslationModel)=>void; onDownload:(model:TranslationModel)=>Promise<boolean> }) {
   const [showCatalog,setShowCatalog]=useState(false);
   const available=models.filter(model=>!model.installed);
-  const installed=models.filter(model=>model.installed);
+  const installed=models.filter(model=>model.installed).sort((left, right) => {
+    const usage = (model: TranslationModel) => games.filter(game => game.modelInstalled && game.sourceLanguage === model.fromCode && game.targetLanguage === model.toCode).length;
+    return usage(right) - usage(left) || left.fromName.localeCompare(right.fromName);
+  });
+  const [showAllInstalled, setShowAllInstalled] = useState(false);
+  const hiddenInstalledCount = Math.max(0, installed.length - 2);
+  useEffect(() => {
+    const grid = document.querySelector<HTMLElement>(".models-page .model-grid");
+    if (!grid) return;
+    const page = grid.closest<HTMLElement>(".models-page");
+    page?.classList.toggle("models-expanded", showAllInstalled);
+    const cards = Array.from(grid.querySelectorAll<HTMLElement>(":scope > article"));
+    cards.forEach((card, index) => { card.hidden = !showAllInstalled && index >= 2; });
+    if (hiddenInstalledCount === 0) return () => page?.classList.remove("models-expanded");
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "show-more-models";
+    toggle.textContent = showAllInstalled ? "Mostrar menos" : `Ver mais modelos (${hiddenInstalledCount})`;
+    toggle.addEventListener("click", () => setShowAllInstalled(expanded => !expanded));
+    grid.insertAdjacentElement("afterend", toggle);
+    return () => { if (toggle.parentElement) toggle.remove(); page?.classList.remove("models-expanded"); };
+  }, [showAllInstalled, hiddenInstalledCount, installed.length]);
   const sources=Array.from(new Map(available.map(model=>[model.fromCode,{code:model.fromCode,name:model.fromName}])).values()).sort((a,b)=>a.name.localeCompare(b.name));
   const [source,setSource]=useState("");
   const destinations=available.filter(model=>model.fromCode===source).sort((a,b)=>a.toName.localeCompare(b.toName));
@@ -376,10 +446,10 @@ function Models({ models, games, onOpenGame, onDelete, onDownload }: { models: T
   const selected=models.find(model=>model.id===selectedId);
   const install=async()=>{if(selected){await onDownload(selected);setShowCatalog(false);}};
   const configuredGames=games.filter(game=>game.modelInstalled).length;
-  return <div className="page models-page"><PageHeading eyebrow="FLUXOS ARGOS" title="Modelos universais" text="Fluxos instalados e compartilhados por Unity e Ren'Py." action={<button className="primary" onClick={()=>setShowCatalog(true)}><Download size={16}/>Baixar modelo</button>}/><div className="universal-note"><Languages size={19}/><div><b>Os modelos são pares direcionados</b><span>A disponibilidade é definida pelo catálogo Argos: ter japonês como origem não significa que todos os destinos existem.</span></div></div><section className="models-overview"><article><Box size={20}/><div><span>Instalados</span><b>{installed.length}</b><small>fluxos universais prontos</small></div></article><article><Gamepad2 size={20}/><div><span>Jogos configurados</span><b>{configuredGames}</b><small>usando modelos locais</small></div></article><article><Download size={20}/><div><span>No catálogo</span><b>{available.length}</b><small>fluxos disponíveis para baixar</small></div></article></section><section className="model-grid">{installed.length ? installed.map(model=>{const modelGames=games.filter(game=>game.modelInstalled&&game.sourceLanguage===model.fromCode&&game.targetLanguage===model.toCode);return <article key={model.id} className="installed"><header className="model-card-head"><div className="model-flag-flow"><LanguageFlag code={model.fromCode} name={model.fromName}/><ChevronRight size={16}/><LanguageFlag code={model.toCode} name={model.toName}/></div><span className="pill success">Instalado</span></header><div className="model-card-copy"><h3>{model.fromName} → {model.toName}</h3><p>Fluxo offline do Argos Translate, compartilhado entre os dois motores.</p></div><div className="model-stat-grid"><div><span>Versão</span><b>{model.version}</b></div><div><span>Compatibilidade</span><b>Unity + Ren'Py</b></div></div><footer><div className="model-usage">{modelGames.length>0&&<div className="model-game-icons">{modelGames.map(game=><button key={game.id} onClick={()=>onOpenGame(game)} title={`Abrir ${game.name}`}>{game.iconData?<img src={game.iconData} alt=""/>:<Gamepad2 size={14}/>}</button>)}</div>}<small>{modelGames.length ? `${modelGames.length} ${modelGames.length===1?"jogo usando":"jogos usando"}` : "Disponível para todos os jogos"}</small></div><button className="model-delete" onClick={()=>onDelete(model)} title="Apagar modelo"><Trash2 size={14}/></button></footer></article>}) : <div className="no-models"><Box size={25}/><h3>Nenhum modelo instalado</h3><p>Use “Baixar modelo” acima para escolher um fluxo disponível.</p></div>}</section><section className="models-guide"><article><Languages size={19}/><div><b>Uso universal</b><span>Um único fluxo instalado atende jogos Unity e Ren'Py.</span></div></article><article><Wrench size={19}/><div><b>Configuração por jogo</b><span>Escolha o par de idiomas na edição do jogo.</span></div></article><article><Activity size={19}/><div><b>Tradução local</b><span>Os fluxos funcionam pelo runtime local do SFTranslator.</span></div></article></section>{showCatalog&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setShowCatalog(false)}}><section className="model-modal"><header><div><span className="eyebrow">CATÁLOGO ARGOS</span><h2>Baixar modelo</h2><p>Escolha uma origem; o destino exibirá somente pares existentes.</p></div><button onClick={()=>setShowCatalog(false)}><X size={18}/></button></header>{available.length?<><div className="form-row"><label>Idioma original<select value={source} onChange={event=>setSource(event.target.value)}>{sources.map(item=><option key={item.code} value={item.code}>{item.name}</option>)}</select></label><label>Destino disponível<select value={selectedId} onChange={event=>setSelectedId(event.target.value)}>{destinations.map(model=><option key={model.id} value={model.id}>{model.toName}</option>)}</select></label></div>{selected&&<div className="catalog-selection"><div className="flow"><span>{selected.fromCode.toUpperCase()}</span><ChevronRight/><span>{selected.toCode.toUpperCase()}</span></div><div><b>{selected.fromName} → {selected.toName}</b><small>Argos Translate · versão {selected.version}</small></div></div>}<footer><button className="secondary" onClick={()=>setShowCatalog(false)}>Cancelar</button><button className="primary" disabled={!selected} onClick={install}><Download size={16}/>Baixar e instalar</button></footer></>:<div className="no-models"><Box/><h3>Todos os fluxos estão instalados</h3></div>}</section></div>}</div>;
+  return <div className="page models-page"><PageHeading eyebrow="FLUXOS ARGOS" title="Modelos universais" text="Fluxos instalados e compartilhados por Unity e Ren'Py." action={<button className="primary" onClick={()=>setShowCatalog(true)}><Download size={16}/>Baixar modelo</button>}/><div className="universal-note"><Languages size={19}/><div><b>Os modelos são pares direcionados</b><span>A disponibilidade é definida pelo catálogo Argos: ter japonês como origem não significa que todos os destinos existem.</span></div></div><section className="models-overview"><article><Box size={20}/><div><span>Instalados</span><b>{installed.length}</b><small>fluxos universais prontos</small></div></article><article><Gamepad2 size={20}/><div><span>Jogos configurados</span><b>{configuredGames}</b><small>usando modelos locais</small></div></article><article><Download size={20}/><div><span>No catálogo</span><b>{available.length}</b><small>fluxos disponíveis para baixar</small></div></article></section><section className="model-grid">{installed.length ? installed.map(model=>{const modelGames=games.filter(game=>game.modelInstalled&&game.sourceLanguage===model.fromCode&&game.targetLanguage===model.toCode);return <article key={model.id} className="installed"><header className="model-card-head"><div className="model-flag-flow"><LanguageFlag code={model.fromCode} name={model.fromName}/><ChevronRight size={16}/><LanguageFlag code={model.toCode} name={model.toName}/></div><span className="pill success">Instalado</span></header><div className="model-card-copy"><h3>{model.fromName} → {model.toName}</h3><p>Fluxo offline do Argos Translate, compartilhado entre os dois motores.</p></div><div className="model-stat-grid"><div><span>Versão</span><b>{model.version}</b></div><div><span>Compatibilidade</span><b>Unity + Ren'Py</b></div></div><footer><div className="model-usage">{modelGames.length>0&&<div className="model-game-icons">{modelGames.map(game=><button key={game.id} onClick={()=>onOpenGame(game)} title={`Abrir ${game.name}`}>{game.iconData?<img src={game.iconData} alt=""/>:<Gamepad2 size={14}/>}</button>)}</div>}<small>{modelGames.length ? `${modelGames.length} ${modelGames.length===1?"jogo usando":"jogos usando"}` : "Disponível para todos os jogos"}</small></div><button className="model-delete" onClick={()=>onDelete(model)} title="Apagar modelo"><Trash2 size={14}/></button></footer></article>}) : <div className="no-models"><Box size={25}/><h3>Nenhum modelo instalado</h3><p>Use “Baixar modelo” acima para escolher um fluxo disponível.</p></div>}</section><section className="models-guide"><article><Languages size={19}/><div><b>Uso universal</b><span>Um único fluxo instalado atende jogos Unity e Ren'Py.</span></div></article><article><Wrench size={19}/><div><b>Configuração por jogo</b><span>Escolha o par de idiomas na edição do jogo.</span></div></article><article><Activity size={19}/><div><b>Tradução local</b><span>Os fluxos funcionam pelo runtime local do SFTranslator.</span></div></article></section>{showCatalog&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setShowCatalog(false)}}><section className="model-modal"><header><div><span className="eyebrow">CATÁLOGO ARGOS</span><h2>Baixar modelo</h2><p>Escolha uma origem; o destino exibirá somente pares existentes.</p></div><button onClick={()=>setShowCatalog(false)}><X size={18}/></button></header>{available.length?<><div className="form-row"><label>Idioma original<UiSelect value={source} options={sources.map(item=>({value:item.code,label:item.name}))} onChange={setSource} ariaLabel="Idioma original"/></label><label>Destino disponível<UiSelect value={selectedId} options={destinations.map(model=>({value:model.id,label:model.toName}))} onChange={setSelectedId} ariaLabel="Destino disponível"/></label></div>{selected&&<div className="catalog-selection"><div className="flow"><span>{selected.fromCode.toUpperCase()}</span><ChevronRight/><span>{selected.toCode.toUpperCase()}</span></div><div><b>{selected.fromName} → {selected.toName}</b><small>Argos Translate · versão {selected.version}</small></div></div>}<footer><button className="secondary" onClick={()=>setShowCatalog(false)}>Cancelar</button><button className="primary" disabled={!selected} onClick={install}><Download size={16}/>Baixar e instalar</button></footer></>:<div className="no-models"><Box/><h3>Todos os fluxos estão instalados</h3></div>}</section></div>}</div>;
 }
 
-function Diagnostics({ health }: { health: EngineHealth[] }) { return <div className="page"><PageHeading eyebrow="SAÚDE DO SISTEMA" title="Diagnósticos" text="Uma leitura honesta dos componentes legados encontrados nesta instalação."/><section className="diagnostic-grid">{health.map(h=><article key={h.engine}><div className="diag-head"><div className="panel-icon"><Wrench size={20}/></div><div><h3>Motor {h.engine}</h3><p>{h.details}</p></div></div><Check label="Código-fonte" value={h.sourceFound}/><Check label="Runtime empacotado" value={h.runtimeFound}/><Check label="Modelo offline" value={h.modelFound}/></article>)}</section></div>; }
+function Diagnostics({ health }: { health: EngineHealth[] }) { return <div className="page"><PageHeading eyebrow="SAÚDE DO SISTEMA" title="Diagnósticos" text="Uma leitura honesta dos componentes legados encontrados nesta instalação."/><section className="diagnostic-grid">{health.map(h=><article key={h.engine}><div className="diag-head"><div className="panel-icon"><Wrench size={20}/></div><div><h3>Motor {h.engine}</h3><p>{h.details}</p></div></div><Check label="Código-fonte" value={h.sourceFound}/><Check label="Runtime empacotado" value={h.runtimeFound}/><Check label="Modelo offline" value={h.modelFound}/></article>)}<article className="diag-coming"><div className="diag-head"><div className="panel-icon"><Gamepad2 size={20}/></div><div><h3>Motor RPGM</h3><p>Suporte planejado para jogos RPG Maker.</p></div></div><span className="pill neutral">Em breve</span><p>O diagnóstico e a instalação serão liberados em uma próxima atualização.</p></article><article className="diag-coming"><div className="diag-head"><div className="panel-icon"><Activity size={20}/></div><div><h3>Próximo motor</h3><p>Ajude a definir qual integração será desenvolvida a seguir.</p></div></div><span className="pill neutral">Votação · em breve</span><p>A votação aparecerá aqui quando a próxima rodada estiver disponível.</p></article></section></div>; }
 function Check({label,value}:{label:string;value:boolean}) { return <div className="check"><span>{label}</span><b className={value?"good":"muted"}>{value?"Encontrado":"Não confirmado"}</b></div>; }
 function SettingsPage() { return <div className="page"><PageHeading eyebrow="PREFERÊNCIAS" title="Configurações" text="A nova base manterá modelos e dados fora das pastas dos jogos."/><section className="settings-card"><div><h3>Tema</h3><p>Interface escura</p><span className="switch on"><i/></span></div><div><h3>Idioma da interface</h3><p>Português (Brasil)</p><button className="secondary">Alterar</button></div><div><h3>Modo avançado</h3><p>Exibe runtime, arquitetura e logs técnicos</p><span className="switch"><i/></span></div></section></div>; }
 function DownloadsPage({tasks}:{tasks:DownloadTask[]}) { return <div className="page"><PageHeading eyebrow="OPERAÇÕES" title="Downloads" text="Acompanhe modelos e componentes sem bloquear o restante do aplicativo."/>{tasks.length?<section className="downloads-list">{tasks.map(task=><article key={task.id} className={task.status}><div className="download-status">{task.status==="baixando"?<span className="spinner"/>:task.status==="concluído"?<Activity size={19}/>:<X size={19}/>}</div><div className="download-copy"><h3>{task.name}</h3><p>{task.detail}</p>{task.status==="baixando"&&<div className="progress-track"><i style={{width:`${task.progress}%`}}/></div>}</div><span className="download-label">{task.status}</span></article>)}</section>:<section className="empty-card compact"><div className="panel-icon"><Download size={24}/></div><h2>Nenhum download por enquanto</h2><p>Os modelos iniciados em Modelos Universais aparecerão aqui.</p></section>}</div>; }

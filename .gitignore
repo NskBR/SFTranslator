@@ -9,6 +9,7 @@
 # Builds e runtimes congelados
 **/build/
 **/dist/
+uat-desktop-tauri/release/
 **/_internal/
 **/*.exe
 **/*.spec.tmp
@@ -37,4 +38,3 @@
 Thumbs.db
 .idea/
 .vscode/
-

@@ -479,6 +479,27 @@ fn open_game_cache(app: AppHandle, game_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn open_game_folder(app: AppHandle, game_id: String) -> Result<(), String> {
+    let game = load_games(&app)?
+        .into_iter()
+        .find(|game| game.id == game_id)
+        .ok_or("Jogo não encontrado.")?;
+    let executable = PathBuf::from(&game.executable_path);
+    let directory = executable
+        .parent()
+        .filter(|path| path.is_dir())
+        .ok_or("A pasta do executável do jogo não foi encontrada.")?;
+    #[cfg(windows)]
+    Command::new("explorer.exe")
+        .arg(directory)
+        .spawn()
+        .map_err(|error| format!("Não foi possível abrir a pasta do jogo: {error}"))?;
+    #[cfg(not(windows))]
+    return Err("Abrir a pasta do jogo está disponível apenas no Windows.".into());
+    Ok(())
+}
+
+#[tauri::command]
 fn clear_game_cache(app: AppHandle, game_id: String) -> Result<(), String> {
     let game = load_games(&app)?
         .into_iter()
@@ -1269,6 +1290,7 @@ pub fn run() {
             remove_game,
             configure_game,
             open_game_cache,
+            open_game_folder,
             clear_game_cache,
             delete_model,
             download_model,
