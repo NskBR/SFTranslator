@@ -1,3 +1,4 @@
+mod catalog;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, OpenOptions},
@@ -317,8 +318,14 @@ fn integration_state(game: &Game) -> (bool, String) {
 #[tauri::command]
 fn list_games(app: AppHandle) -> Result<Vec<Game>, String> {
     let mut games = load_games(&app)?;
+    let installed = catalog::installed_packages(&models_directory(&app)?.join("argos-translate"));
     let mut changed = false;
     for game in &mut games {
+        let model_installed = installed.contains_key(&format!("{}-{}", game.source_language, game.target_language));
+        if game.model_installed != model_installed {
+            game.model_installed = model_installed;
+            changed = true;
+        }
         let normalized = native_game_path(Path::new(&game.executable_path));
         let normalized = normalized.to_string_lossy().into_owned();
         if game.executable_path != normalized {
@@ -443,8 +450,8 @@ fn configure_game(
         .ok_or("Jogo não encontrado.")?;
     game.source_language = source_language;
     game.target_language = target_language;
-    game.model_installed = list_models(app.clone()).iter().any(|model| {
-        model.from_code == game.source_language && model.to_code == game.target_language
+    game.model_installed = list_models(app.clone())?.iter().any(|model| {
+        model.installed && model.from_code == game.source_language && model.to_code == game.target_language
     });
     let (integration_ready, integration_status) = integration_state(game);
     game.integration_status = Some(integration_status);
@@ -527,8 +534,7 @@ fn clear_game_cache(app: AppHandle, game_id: String) -> Result<(), String> {
 
 #[tauri::command]
 fn delete_model(app: AppHandle, model_id: String) -> Result<(), String> {
-    let root = project_root().ok_or("Pasta dos motores não encontrada.")?;
-    let packages = root.join("uat-renpy/models/argos-translate/packages");
+    let packages = models_directory(&app)?.join("argos-translate/packages");
     let entries = fs::read_dir(&packages).map_err(|e| e.to_string())?;
     let mut removed = false;
     for entry in entries.flatten() {
@@ -565,12 +571,8 @@ fn delete_model(app: AppHandle, model_id: String) -> Result<(), String> {
 
 #[tauri::command]
 fn download_model(app: AppHandle, model_id: String) -> Result<(), String> {
-    let root = project_root().ok_or("Pasta dos motores não encontrada.")?;
-    let models_root = root.join("uat-renpy/models/argos-translate");
-    let catalog: Vec<serde_json::Value> = serde_json::from_slice(
-        &fs::read(models_root.join("index.json")).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| format!("Catálogo Argos inválido: {e}"))?;
+    let models_root = models_directory(&app)?.join("argos-translate");
+    let catalog = catalog::load_catalog(&models_root);
     let package = catalog
         .iter()
         .find(|value| {
@@ -1014,7 +1016,7 @@ fn run_game_session(app: AppHandle, game: Game, project: PathBuf) -> Result<i32,
                 launcher.display()
             ));
         }
-        let universal_models = project.join("uat-renpy/models");
+        let universal_models = models_directory(&app)?;
         session_log(
             &app,
             "system",
@@ -1087,6 +1089,7 @@ fn run_game_session(app: AppHandle, game: Game, project: PathBuf) -> Result<i32,
         server
             .arg("__server__")
             .current_dir(&engine_root)
+            .env("UAT_MODELS_DIR", models_directory(&app)?)
             .env("PYTHONIOENCODING", "utf-8");
         translation_server = spawn_streaming(server, &app, "servidor Ren'Py")?;
     }
@@ -1164,12 +1167,21 @@ fn launch_game(app: AppHandle, game_id: String) -> Result<(), String> {
 }
 
 fn project_root() -> Option<PathBuf> {
-    let cwd = std::env::current_dir().ok()?;
-    cwd.ancestors()
-        .find(|candidate| {
+    let executable = std::env::current_exe().ok();
+    let cwd = std::env::current_dir().ok();
+    executable.as_deref().and_then(Path::parent).into_iter()
+        .chain(cwd.as_deref())
+        .chain(Some(Path::new(env!("CARGO_MANIFEST_DIR"))))
+        .find_map(|base| base.ancestors().find(|candidate| {
             candidate.join("uat-renpy").is_dir() && candidate.join("uat-unity").is_dir()
-        })
-        .map(Path::to_path_buf)
+        }).map(Path::to_path_buf))
+}
+
+fn models_directory(app: &AppHandle) -> Result<PathBuf, String> {
+    if let Some(root) = project_root() {
+        return Ok(root.join("uat-renpy/models"));
+    }
+    Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join("models"))
 }
 
 #[tauri::command]
@@ -1214,33 +1226,16 @@ fn engine_health() -> Vec<EngineHealth> {
 }
 
 #[tauri::command]
-fn list_models(app: AppHandle) -> Vec<TranslationModel> {
+fn list_models(app: AppHandle) -> Result<Vec<TranslationModel>, String> {
     let games = load_games(&app).unwrap_or_default();
-    let Some(root) = project_root() else {
-        return Vec::new();
-    };
-    let packages = root.join("uat-renpy/models/argos-translate/packages");
-    let installed: std::collections::HashSet<String> = fs::read_dir(&packages)
-        .ok()
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|entry| {
-            let value: serde_json::Value =
-                serde_json::from_slice(&fs::read(entry.path().join("metadata.json")).ok()?).ok()?;
-            Some(format!(
-                "{}-{}",
-                value.get("from_code")?.as_str()?,
-                value.get("to_code")?.as_str()?
-            ))
-        })
-        .collect();
-    let index = root.join("uat-renpy/models/argos-translate/index.json");
-    let catalog: Vec<serde_json::Value> = fs::read(index)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default();
-    catalog
+    let models_root = models_directory(&app)?.join("argos-translate");
+    let installed = catalog::installed_packages(&models_root);
+    let mut catalog = catalog::load_catalog(&models_root);
+    for value in installed.values() {
+        catalog.retain(|entry| catalog::pair_id(entry) != catalog::pair_id(value));
+        catalog.push(value.clone());
+    }
+    Ok(catalog
         .into_iter()
         .filter_map(|value| {
             let from_code = value.get("from_code")?.as_str()?.to_string();
@@ -1255,7 +1250,7 @@ fn list_models(app: AppHandle) -> Vec<TranslationModel> {
                 })
                 .count();
             Some(TranslationModel {
-                installed: installed.contains(&id),
+                installed: installed.contains_key(&id),
                 id,
                 from_name: value
                     .get("from_name")
@@ -1277,7 +1272,7 @@ fn list_models(app: AppHandle) -> Vec<TranslationModel> {
                 used_by,
             })
         })
-        .collect()
+        .collect())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

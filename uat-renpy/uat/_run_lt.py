@@ -79,6 +79,9 @@ def _find_models_dir():
     1) uat/lt/models      (lt/ colado dentro de uat/)
     2) <raiz>/lt/models   (pasta lt/ inteira colada na raiz do jogo)
     3) <raiz>/models      (conteudo de lt/ colado na raiz, exe junto do game)"""
+    override = os.environ.get("UAT_MODELS_DIR")
+    if override:
+        return os.path.abspath(override)
     root = os.path.dirname(UAT_DIR)
     for c in (os.path.join(UAT_DIR, "lt", "models"),
               os.path.join(root, "lt", "models"),
