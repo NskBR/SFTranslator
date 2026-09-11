@@ -17,6 +17,12 @@ export interface Game {
   detectedLanguage?: string;
   languageConfidence?: number;
   integrationStatus?: string;
+  flowMode: "direct" | "chain";
+  intermediateLanguage?: string;
+}
+
+export interface AppSettings {
+  enableExperimentalChainedFlow: boolean;
 }
 
 export interface EngineHealth {

@@ -38,6 +38,25 @@ struct Game {
     language_confidence: Option<f64>,
     #[serde(default)]
     integration_status: Option<String>,
+    #[serde(default = "default_flow_mode")]
+    flow_mode: String,
+    #[serde(default)]
+    intermediate_language: Option<String>,
+}
+
+fn default_flow_mode() -> String { "direct".into() }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AppSettings {
+    #[serde(default)]
+    enable_experimental_chained_flow: bool,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self { enable_experimental_chained_flow: false }
+    }
 }
 
 #[derive(Serialize)]
@@ -67,6 +86,25 @@ fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join("games.json"))
+}
+
+fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("settings.json"))
+}
+
+fn load_settings(app: &AppHandle) -> Result<AppSettings, String> {
+    let path = settings_path(app)?;
+    if !path.exists() { return Ok(AppSettings::default()); }
+    serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?)
+        .map_err(|e| format!("Configurações inválidas: {e}"))
+}
+
+fn save_settings(app: &AppHandle, settings: &AppSettings) -> Result<(), String> {
+    let path = settings_path(app)?;
+    fs::write(path, serde_json::to_vec_pretty(settings).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
 }
 
 fn load_games(app: &AppHandle) -> Result<Vec<Game>, String> {
@@ -117,11 +155,24 @@ fn cache_component(value: &str) -> String {
 }
 
 fn renpy_cache_pair(game: &Game) -> String {
-    format!(
-        "{}_{}",
-        cache_component(&game.source_language),
-        cache_component(&game.target_language)
-    )
+    let mut parts = vec![cache_component(&game.source_language)];
+    if game.flow_mode == "chain" {
+        parts.push(cache_component(game.intermediate_language.as_deref().unwrap_or("en")));
+    }
+    parts.push(cache_component(&game.target_language));
+    parts.join("_")
+}
+
+fn required_model_ids(game: &Game) -> Vec<String> {
+    if game.flow_mode == "chain" {
+        let middle = game.intermediate_language.as_deref().unwrap_or("en");
+        vec![
+            format!("{}-{middle}", game.source_language),
+            format!("{middle}-{}", game.target_language),
+        ]
+    } else {
+        vec![format!("{}-{}", game.source_language, game.target_language)]
+    }
 }
 
 fn game_root(game: &Game) -> Result<PathBuf, String> {
@@ -131,21 +182,15 @@ fn game_root(game: &Game) -> Result<PathBuf, String> {
         .ok_or("Pasta do jogo inválida.".into())
 }
 
-fn unity_cache_language(code: &str) -> String {
-    match code.trim().to_ascii_lowercase().as_str() {
-        "pb" | "pt-br" | "pt_br" => "pt-BR".into(),
-        value if value.is_empty() => "unknown".into(),
-        value => value.into(),
-    }
-}
-
 fn game_cache_directory(game: &Game) -> Result<PathBuf, String> {
     let root = game_root(game)?;
     if game.engine == "Unity" {
-        Ok(root
-            .join("BepInEx/Translation")
-            .join(unity_cache_language(&game.target_language))
-            .join("Text"))
+        let cache = if game.flow_mode == "chain" {
+            root.join("BepInEx/Translation/SFTranslator").join(renpy_cache_pair(game))
+        } else {
+            root.join("BepInEx/Translation").join(&game.target_language)
+        };
+        Ok(cache.join("Text"))
     } else {
         Ok(root.join("uat/caches"))
     }
@@ -321,7 +366,7 @@ fn list_games(app: AppHandle) -> Result<Vec<Game>, String> {
     let installed = catalog::installed_packages(&models_directory(&app)?.join("argos-translate"));
     let mut changed = false;
     for game in &mut games {
-        let model_installed = installed.contains_key(&format!("{}-{}", game.source_language, game.target_language));
+        let model_installed = required_model_ids(game).iter().all(|id| installed.contains_key(id));
         if game.model_installed != model_installed {
             game.model_installed = model_installed;
             changed = true;
@@ -396,6 +441,8 @@ fn add_game(app: AppHandle, executable_path: String) -> Result<Game, String> {
         detected_language: Some(detected_language),
         language_confidence: Some(language_confidence),
         integration_status: None,
+        flow_mode: default_flow_mode(),
+        intermediate_language: None,
     };
     let (_, integration_status) = integration_state(&game);
     let mut game = game;
@@ -442,17 +489,29 @@ fn configure_game(
     game_id: String,
     source_language: String,
     target_language: String,
+    flow_mode: String,
+    intermediate_language: Option<String>,
 ) -> Result<Game, String> {
+    if flow_mode != "direct" && flow_mode != "chain" {
+        return Err("Modo de fluxo inválido.".into());
+    }
+    if flow_mode == "chain" && intermediate_language.as_deref() != Some("en") {
+        return Err("O fluxo experimental usa inglês como idioma intermediário.".into());
+    }
     let mut games = load_games(&app)?;
     let game = games
         .iter_mut()
         .find(|game| game.id == game_id)
         .ok_or("Jogo não encontrado.")?;
+    if flow_mode == "chain" && !load_settings(&app)?.enable_experimental_chained_flow && game.flow_mode != "chain" {
+        return Err("Ative o fluxo experimental nas Configurações antes de criar uma cadeia.".into());
+    }
     game.source_language = source_language;
     game.target_language = target_language;
-    game.model_installed = list_models(app.clone())?.iter().any(|model| {
-        model.installed && model.from_code == game.source_language && model.to_code == game.target_language
-    });
+    game.flow_mode = flow_mode;
+    game.intermediate_language = if game.flow_mode == "chain" { Some("en".into()) } else { None };
+    let installed = catalog::installed_packages(&models_directory(&app)?.join("argos-translate"));
+    game.model_installed = required_model_ids(game).iter().all(|id| installed.contains_key(id));
     let (integration_ready, integration_status) = integration_state(game);
     game.integration_status = Some(integration_status);
     game.status = if game.model_installed && integration_ready {
@@ -465,6 +524,15 @@ fn configure_game(
     let result = game.clone();
     save_games(&app, &games)?;
     Ok(result)
+}
+
+#[tauri::command]
+fn get_settings(app: AppHandle) -> Result<AppSettings, String> { load_settings(&app) }
+
+#[tauri::command]
+fn update_settings(app: AppHandle, settings: AppSettings) -> Result<AppSettings, String> {
+    save_settings(&app, &settings)?;
+    Ok(settings)
 }
 
 #[tauri::command]
@@ -560,10 +628,11 @@ fn delete_model(app: AppHandle, model_id: String) -> Result<(), String> {
         return Err("Modelo não encontrado.".into());
     }
     let mut games = load_games(&app)?;
+    let installed = catalog::installed_packages(&models_directory(&app)?.join("argos-translate"));
     for game in &mut games {
-        if format!("{}-{}", game.source_language, game.target_language) == model_id {
-            game.model_installed = false;
-            game.status = "Modelo necessário".into();
+        if required_model_ids(game).iter().any(|id| id == &model_id) {
+            game.model_installed = required_model_ids(game).iter().all(|id| installed.contains_key(id));
+            if !game.model_installed { game.status = "Modelo necessário".into(); }
         }
     }
     save_games(&app, &games)
@@ -816,6 +885,8 @@ fn install_renpy_hook(engine_root: &Path, game: &Game, app: &AppHandle) -> Resul
         && config["target_language"].as_str() == Some(game.target_language.as_str());
     config["source_language"] = serde_json::json!(game.source_language);
     config["target_language"] = serde_json::json!(game.target_language);
+    config["flow_mode"] = serde_json::json!(game.flow_mode);
+    config["intermediate_language"] = serde_json::json!(game.intermediate_language);
     let cache_pair = renpy_cache_pair(game);
     fs::create_dir_all(game_root.join("uat/caches")).map_err(|error| error.to_string())?;
     if flow_is_unchanged {
@@ -1054,6 +1125,8 @@ fn run_game_session(app: AppHandle, game: Game, project: PathBuf) -> Result<i32,
             .arg("config")
             .arg(&game.source_language)
             .arg(&game.target_language)
+            .arg(&game.flow_mode)
+            .arg(game.intermediate_language.as_deref().unwrap_or(""))
             .current_dir(launcher.parent().unwrap_or(&project))
             .env("UAT_GAME_DIR", game_root)
             .env("UAT_MODELS_DIR", &universal_models)
@@ -1244,9 +1317,7 @@ fn list_models(app: AppHandle) -> Result<Vec<TranslationModel>, String> {
             let used_by = games
                 .iter()
                 .filter(|game| {
-                    game.model_installed
-                        && game.source_language == from_code
-                        && game.target_language == to_code
+                    game.model_installed && required_model_ids(game).iter().any(|pair| pair == &id)
                 })
                 .count();
             Some(TranslationModel {
@@ -1287,6 +1358,8 @@ pub fn run() {
             open_game_cache,
             open_game_folder,
             clear_game_cache,
+            get_settings,
+            update_settings,
             delete_model,
             download_model,
             launch_game,
@@ -1300,8 +1373,25 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn game(flow_mode: &str, middle: Option<&str>) -> Game {
+        Game {
+            id: "id".into(), name: "game".into(), executable_path: "game.exe".into(), engine: "Unity".into(),
+            runtime: None, architecture: None, status: "Novo".into(), source_language: "ja".into(), target_language: "pb".into(),
+            added_at: "now".into(), last_launch: None, icon_data: None, model_installed: false, detected_language: None,
+            language_confidence: None, integration_status: None, flow_mode: flow_mode.into(), intermediate_language: middle.map(str::to_string),
+        }
+    }
     #[test]
     fn rejects_missing_game() {
         assert!(inspect_game(Path::new("missing.exe")).is_err());
+    }
+
+    #[test]
+    fn chained_flow_requires_both_models_and_uses_a_distinct_cache_key() {
+        let chained = game("chain", Some("en"));
+        assert_eq!(required_model_ids(&chained), ["ja-en", "en-pb"]);
+        assert_eq!(renpy_cache_pair(&chained), "ja_en_pb");
+        assert_eq!(required_model_ids(&game("direct", None)), ["ja-pb"]);
     }
 }

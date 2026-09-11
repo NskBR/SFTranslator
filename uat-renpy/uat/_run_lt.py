@@ -649,6 +649,8 @@ def _load_only():
         tgt = cfg.get("target_language", "pt-BR")
         langs.add(_argos_code(src))
         langs.add(_argos_code(tgt))
+        if cfg.get("flow_mode") == "chain":
+            langs.add(_argos_code(cfg.get("intermediate_language", "en")))
     except Exception:
         pass
     return ",".join(sorted(langs))

@@ -215,6 +215,22 @@ class SafetyTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=2)
 
+    def test_chain_translates_two_pairs_in_one_runtime(self):
+        config = {'source_language': 'ja', 'target_language': 'pt-BR',
+                  'flow_mode': 'chain', 'intermediate_language': 'en'}
+        with patch.object(uat, 'load_config', return_value=config), \
+             patch.object(uat, '_translate_pair', side_effect=[(True, 'Hello'), (True, 'Olá')]) as translate:
+            self.assertEqual(uat.translate_text('こんにちは', 'auto', 'pb'), 'Olá')
+        self.assertEqual(translate.call_args_list[0].args[1:], ('ja', 'en'))
+        self.assertEqual(translate.call_args_list[1].args[1:], ('en', 'pb'))
+
+    def test_chain_never_returns_intermediate_text_when_second_step_fails(self):
+        config = {'source_language': 'ja', 'target_language': 'pt-BR',
+                  'flow_mode': 'chain', 'intermediate_language': 'en'}
+        with patch.object(uat, 'load_config', return_value=config), \
+             patch.object(uat, '_translate_pair', side_effect=[(True, 'Hello'), (False, 'Hello')]):
+            self.assertEqual(uat.translate_text('こんにちは', 'auto', 'pb'), 'こんにちは')
+
 
 @unittest.skipUnless(os.environ.get('UAT_LIVE_TEST') == '1',
                      'defina UAT_LIVE_TEST=1 para testar os ZIPs oficiais')

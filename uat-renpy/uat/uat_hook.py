@@ -405,37 +405,20 @@ def _translate_local(texts):
     timeout = float(cfg.get("timeout", 5))
     sl = SOURCE
     dl = TARGET
-    payload = {
-        "q": list(texts),
-        "source": sl,
-        "target": dl,
-        "format": "text",
-    }
-    if api_key:
-        payload["api_key"] = api_key
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        endpoint,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        result = json.loads(resp.read().decode("utf-8"))
-    # LibreTranslate retorna {"translatedText": ["..."]} (dict com lista)
-    # ou [{"translatedText": "..."}] (lista de dicts)
-    raw = None
-    if isinstance(result, list):
-        raw = [r.get("translatedText", "") if isinstance(r, dict) else r for r in result]
-    elif isinstance(result, dict):
-        raw = result.get("translatedText", "")
-    if isinstance(raw, list):
-        out = [str(x) for x in raw]
-    else:
-        out = [str(raw)]
-    while len(out) < len(texts):
-        out.append(texts[len(out)])
-    return out
+    def request_pair(values, source, target):
+        payload = {"q": list(values), "source": source, "target": target, "format": "text"}
+        if api_key: payload["api_key"] = api_key
+        req = urllib.request.Request(endpoint, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+        raw = result.get("translatedText", "") if isinstance(result, dict) else [item.get("translatedText", "") if isinstance(item, dict) else item for item in result]
+        out = [str(item) for item in raw] if isinstance(raw, list) else [str(raw)]
+        return out + list(values[len(out):])
+    if CONFIG.get("flow_mode") == "chain":
+        middle = CONFIG.get("intermediate_language") or "en"
+        first = request_pair(texts, sl, middle)
+        return request_pair(first, middle, dl)
+    return request_pair(texts, sl, dl)
 
 
 # --- Provider registry com fallback ---

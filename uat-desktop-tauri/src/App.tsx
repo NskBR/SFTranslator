@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -10,7 +11,7 @@ import {
   ChevronDown, Languages, LayoutGrid, Library, List, Maximize2, Minus, Play, Plus, Search,
   Settings, Trash2, Wrench, X, Pencil
 } from "lucide-react";
-import type { EngineHealth, Game, TranslationModel } from "./types";
+import type { AppSettings, EngineHealth, Game, TranslationModel } from "./types";
 
 type DownloadTask = {id:string; modelId:string; name:string; status:"baixando"|"concluído"|"erro"; detail:string; progress:number};
 type SessionLine = {kind:string; text:string};
@@ -56,6 +57,7 @@ function App() {
   const [games, setGames] = useState<Game[]>([]);
   const [health, setHealth] = useState<EngineHealth[]>([]);
   const [models, setModels] = useState<TranslationModel[]>([]);
+  const [settings, setSettings] = useState<AppSettings>({ enableExperimentalChainedFlow: false });
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("Todos");
   const [toast, setToast] = useState<string>();
@@ -86,6 +88,7 @@ function App() {
       invoke<Game[]>("list_games").then(setGames),
       invoke<EngineHealth[]>("engine_health").then(setHealth),
       invoke<TranslationModel[]>("list_models").then(setModels),
+      invoke<AppSettings>("get_settings").then(setSettings),
     ]);
     const errors = results.filter(result => result.status === "rejected");
     if (errors.length) throw new Error(errors.map(result => String(result.reason)).join("; "));
@@ -164,14 +167,23 @@ function App() {
     setPage("Adicionar jogo");
   };
 
-  const configureGame = async (game: Game, sourceLanguage: string, targetLanguage: string) => {
+  const configureGame = async (game: Game, sourceLanguage: string, targetLanguage: string, flowMode: "direct"|"chain", intermediateLanguage?: string) => {
     try {
-      const requiredModel = models.find(model => model.fromCode === sourceLanguage && model.toCode === targetLanguage);
-      if (requiredModel && !requiredModel.installed && !await downloadModel(requiredModel)) return;
-      const updated = await invoke<Game>("configure_game", { gameId: game.id, sourceLanguage, targetLanguage });
-      await refresh(); setSelectedGame(updated); setPage("Biblioteca");
+      const pairs = flowMode === "chain" ? [[sourceLanguage, "en"], ["en", targetLanguage]] : [[sourceLanguage, targetLanguage]];
+      for (const [from, to] of pairs) {
+        const requiredModel = models.find(model => model.fromCode === from && model.toCode === to);
+        if (!requiredModel) throw new Error(`Fluxo indisponível: ${from.toUpperCase()} → ${to.toUpperCase()}`);
+        if (!requiredModel.installed && !await downloadModel(requiredModel)) return;
+      }
+      const updated = await invoke<Game>("configure_game", { gameId: game.id, sourceLanguage, targetLanguage, flowMode, intermediateLanguage });
+      await refresh(); setSelectedGame(undefined); setPage("Biblioteca");
       setToast(updated.modelInstalled ? "Configuração salva. O fluxo está disponível." : "Configuração salva. Baixe o fluxo necessário em Modelos.");
     } catch (e) { setToast(String(e)); }
+  };
+
+  const updateSettings = async (next: AppSettings) => {
+    try { setSettings(await invoke<AppSettings>("update_settings", { settings: next })); }
+    catch (error) { setToast(String(error)); }
   };
 
   const deleteModel = async (model: TranslationModel) => {
@@ -306,16 +318,16 @@ function App() {
       </aside>
       <main>
         {page === "Biblioteca" && (selectedGame
-          ? <GameDetails game={selectedGame} models={models} onBack={() => setSelectedGame(undefined)} onRemove={() => setGamePendingDeletion(selectedGame)} onSave={configureGame} onOpenCache={() => openGameCache(selectedGame)} onClearCache={() => clearGameCache(selectedGame)}/>
-          : <LibraryPage games={filtered} filter={filter} setFilter={setFilter} query={query} setQuery={setQuery} onAddGame={beginAddGame} onSelect={setSelectedGame} onLaunch={launchGame}/>)} 
-        {page === "Adicionar jogo" && <Wizard existingGame={selectedGame} models={models} onSave={configureGame}/>} 
+          ? <GameDetails game={selectedGame} models={models} experimentalEnabled={settings.enableExperimentalChainedFlow} onBack={() => setSelectedGame(undefined)} onRemove={() => setGamePendingDeletion(selectedGame)} onSave={configureGame} onOpenCache={() => openGameCache(selectedGame)} onClearCache={() => clearGameCache(selectedGame)}/>
+          : <LibraryPage games={filtered} filter={filter} setFilter={setFilter} query={query} setQuery={setQuery} onAddGame={beginAddGame} onSelect={setSelectedGame} onLaunch={launchGame} onDelete={setGamePendingDeletion}/>)}
+        {page === "Adicionar jogo" && <Wizard existingGame={selectedGame} models={models} experimentalEnabled={settings.enableExperimentalChainedFlow} onSave={configureGame}/>}
         {page === "Modelos" && <Models models={models} games={games} onOpenGame={openGameDetails} onDelete={deleteModel} onDownload={downloadModel}/>} 
         {page === "Downloads" && <DownloadsPage tasks={downloads}/>} 
         {page === "Sessão" && sessionGame && (
           <SessionPage game={sessionGame} lines={sessionLines} running={sessionRunning} onBack={() => setPage("Biblioteca")} onRestart={() => launchGame(sessionGame)}/>
         )}
         {page === "Diagnósticos" && <Diagnostics health={health}/>} 
-        {page === "Configurações" && <SettingsPage/>}
+        {page === "Configurações" && <SettingsPage settings={settings} onChange={updateSettings}/>}
         {page === "Sobre" && <EmptyPage icon={Languages} title="SFTranslator" text="Uma biblioteca universal de tradução para jogos Ren'Py e Unity."/>}
         <footer className="context-bar"><span><Activity size={14}/>{contextText}</span><b>{sessionRunning ? "Sessão ativa" : "Pronto"}</b></footer>
       </main>
@@ -335,7 +347,7 @@ function PageHeading({ eyebrow, title, text, action }: { eyebrow?: string; title
   return <div className="page-heading"><div>{eyebrow && <span className="eyebrow">{eyebrow}</span>}<h1>{title}</h1><p>{text}</p></div>{action}</div>;
 }
 
-function LibraryPage({ games, filter, setFilter, query, setQuery, onAddGame, onSelect, onLaunch }: { games: Game[]; filter: string; setFilter: (v:string)=>void; query:string; setQuery:(v:string)=>void; onAddGame:()=>void; onSelect:(game:Game)=>void; onLaunch:(game:Game)=>void }) {
+function LibraryPage({ games, filter, setFilter, query, setQuery, onAddGame, onSelect, onLaunch, onDelete }: { games: Game[]; filter: string; setFilter: (v:string)=>void; query:string; setQuery:(v:string)=>void; onAddGame:()=>void; onSelect:(game:Game)=>void; onLaunch:(game:Game)=>void; onDelete:(game:Game)=>void }) {
   const [view,setView]=useState<"list"|"grid">(()=>{try{return localStorage.getItem("sftranslator_library_view")==="grid"?"grid":"list";}catch{return "list";}});
   const changeView=(next:"list"|"grid")=>{setView(next);try{localStorage.setItem("sftranslator_library_view",next);}catch{/* noop */}};
   return <div className="page library-page">
@@ -344,34 +356,43 @@ function LibraryPage({ games, filter, setFilter, query, setQuery, onAddGame, onS
     {games.length === 0
       ? <section className="empty-card library-empty"><div className="empty-art"><div/><Gamepad2 size={38}/></div><h2>Nenhum jogo na biblioteca</h2><p>Use “Adicionar jogo” acima para selecionar um executável e preparar a tradução.</p><div className="empty-steps"><div><b>1</b><span><strong>Selecione o jogo</strong><small>Escolha o executável principal.</small></span></div><div><b>2</b><span><strong>Defina o fluxo</strong><small>Use um modelo instalado ou baixe outro.</small></span></div><div><b>3</b><span><strong>Inicie e traduza</strong><small>Acompanhe tudo pelo console interno.</small></span></div></div></section>
       : <section className={`game-grid view-${view}`}>
-          {games.map(game=><article className={`game-card ${game.status === "Pronto" ? "ready" : "pending"}`} key={game.id}>
+          {games.map(game=><article className={`game-card ${game.status === "Pronto" ? "ready" : "pending"}`} key={game.id} onDoubleClick={event=>{if(!(event.target as HTMLElement).closest("button"))onSelect(game)}}>
             <div className={`game-cover ${game.engine === "Unity" ? "unity" : "renpy"}`}>{game.iconData ? <img src={game.iconData} alt={`Ícone de ${game.name}`}/> : <Gamepad2 size={34}/>}</div>
             <div className="game-info">
               <div className="game-title"><div><h3>{game.name}</h3><span className="engine-tag">{game.engine}</span></div><p>{game.executablePath}</p></div>
               <div className="game-meta">
-                <div className="language-pair" title="Fluxo de tradução">{game.modelInstalled?<><LanguageFlag code={game.sourceLanguage} name={game.sourceLanguage.toUpperCase()}/><ChevronRight size={12}/><LanguageFlag code={game.targetLanguage} name={game.targetLanguage.toUpperCase()}/></>:<span>Sem modelo</span>}</div>
-                <div className="status"><i className={`dot ${game.status === "Pronto" ? "ok" : "warn"}`}/>{game.status}</div>
+                <div className="language-pair" title="Fluxo de tradução">{game.flowMode==="chain"?<><LanguageFlag code={game.sourceLanguage} name={game.sourceLanguage.toUpperCase()}/><ChevronRight size={12}/><LanguageFlag code="en" name="English"/><ChevronRight size={12}/><LanguageFlag code={game.targetLanguage} name={game.targetLanguage.toUpperCase()}/></>:game.modelInstalled?<><LanguageFlag code={game.sourceLanguage} name={game.sourceLanguage.toUpperCase()}/><ChevronRight size={12}/><LanguageFlag code={game.targetLanguage} name={game.targetLanguage.toUpperCase()}/></>:<span>Sem modelo</span>}</div>
+                <div className="status"><i className={`dot ${game.status === "Pronto" ? "ok" : "warn"}`}/>{game.status === "Instalação pendente" ? "Abra o jogo para iniciar a instalação" : game.status}</div>
               </div>
             </div>
             <time className="game-last-launch"><span>Última execução</span><b>{game.lastLaunch?new Date(game.lastLaunch).toLocaleString("pt-BR",{dateStyle:"short",timeStyle:"short"}):"Nunca iniciado"}</b></time>
-            <div className="row-actions"><button className="play-action" onClick={()=>onLaunch(game)} title="Iniciar jogo"><Play size={17} fill="currentColor"/></button><button className="more-action" onClick={()=>onSelect(game)} title="Editar jogo"><Pencil size={15}/></button></div>
+            <div className="row-actions"><button className="play-action" onClick={()=>onLaunch(game)} title="Iniciar jogo"><Play size={17} fill="currentColor"/></button><button className="more-action" onClick={()=>onSelect(game)} title="Editar jogo"><Pencil size={15}/></button><button className="model-delete" onClick={()=>onDelete(game)} title="Remover jogo" aria-label={`Remover ${game.name}`}><Trash2 size={15}/></button></div>
           </article>)}
         </section>}
   </div>;
 }
 
-function GameDetails({ game, models, onBack, onRemove, onSave, onOpenCache, onClearCache }: { game: Game; models:TranslationModel[]; onBack:()=>void; onRemove:()=>void; onSave:(game:Game,source:string,target:string)=>Promise<void>; onOpenCache:()=>void; onClearCache:()=>void }) {
+function GameDetails({ game, models, experimentalEnabled, onBack, onRemove, onSave, onOpenCache, onClearCache }: { game: Game; models:TranslationModel[]; experimentalEnabled:boolean; onBack:()=>void; onRemove:()=>void; onSave:(game:Game,source:string,target:string,flowMode:"direct"|"chain",intermediate?:string)=>Promise<void>; onOpenCache:()=>void; onClearCache:()=>void }) {
   const sources=useMemo(()=>Array.from(new Map(models.map(model=>[model.fromCode,{code:model.fromCode,name:model.fromName}])).values()).sort((a,b)=>a.name.localeCompare(b.name)),[models]);
   const preferredSource=game.sourceLanguage||game.detectedLanguage||sources[0]?.code||"";
   const [source,setSource]=useState(sources.some(item=>item.code===preferredSource)?preferredSource:(game.detectedLanguage||sources[0]?.code||""));
-  const destinations=useMemo(()=>models.filter(model=>model.fromCode===source).sort((a,b)=>a.toName.localeCompare(b.toName)),[models,source]);
+  const [flowMode,setFlowMode]=useState<"direct"|"chain">(game.flowMode||"direct");
+  const directDestinations=useMemo(()=>models.filter(model=>model.fromCode===source).sort((a,b)=>a.toName.localeCompare(b.toName)),[models,source]);
+  const chainDestinations=useMemo(()=>models.filter(model=>model.fromCode==="en"&&model.toCode!=="en"&&models.some(first=>first.fromCode===source&&first.toCode==="en")).sort((a,b)=>a.toName.localeCompare(b.toName)),[models,source]);
+  const destinations=flowMode==="chain"?chainDestinations:directDestinations;
   const [target,setTarget]=useState(game.targetLanguage||destinations[0]?.toCode||"");
   const [saving,setSaving]=useState(false);
+  const [flowTarget,setFlowTarget]=useState<HTMLElement>();
   const installedModels=useMemo(()=>models.filter(model=>model.installed).sort((a,b)=>`${a.fromName}${a.toName}`.localeCompare(`${b.fromName}${b.toName}`)),[models]);
-  useEffect(()=>{const next=game.sourceLanguage||game.detectedLanguage||sources[0]?.code||"";setSource(sources.some(item=>item.code===next)?next:(game.detectedLanguage||sources[0]?.code||""));setTarget(game.targetLanguage||"");},[game.id]);
-  useEffect(()=>{if(!destinations.some(model=>model.toCode===target))setTarget(destinations[0]?.toCode||"");},[source,models]);
+  useEffect(()=>{const next=game.sourceLanguage||game.detectedLanguage||sources[0]?.code||"";setSource(sources.some(item=>item.code===next)?next:(game.detectedLanguage||sources[0]?.code||""));setTarget(game.targetLanguage||"");setFlowMode(game.flowMode||"direct");},[game.id]);
+  useEffect(()=>{if(!destinations.some(model=>model.toCode===target))setTarget(destinations[0]?.toCode||"");},[source,models,flowMode]);
+  useEffect(()=>{setFlowTarget(document.querySelector<HTMLElement>(".game-config-page .game-flow-editor")||undefined);},[game.id]);
   const selectedModel=models.find(model=>model.fromCode===source&&model.toCode===target);
-  const save=async()=>{if(!selectedModel)return;setSaving(true);try{await onSave(game,source,target);}finally{setSaving(false);}};
+  const chainModels=[models.find(model=>model.fromCode===source&&model.toCode==="en"),models.find(model=>model.fromCode==="en"&&model.toCode===target)];
+  const requiredModels=flowMode==="chain"?chainModels:[selectedModel];
+  const flowReady=requiredModels.length>0&&requiredModels.every(Boolean);
+  const installed=flowReady&&requiredModels.every(model=>model?.installed);
+  const save=async()=>{if(!flowReady)return;setSaving(true);try{await onSave(game,source,target,flowMode,flowMode==="chain"?"en":undefined);}finally{setSaving(false);}};
   const pathParts=game.executablePath.split(/[\\/]/);
   const executableName=pathParts.pop()||game.name;
   const gameDirectory=pathParts.join("\\");
@@ -380,7 +401,8 @@ function GameDetails({ game, models, onBack, onRemove, onSave, onOpenCache, onCl
     <section className="game-config-identity">
       <div className="game-identity-primary"><div className={`details-icon game-cover ${game.engine === "Unity"?"unity":"renpy"}`}>{game.iconData?<img src={game.iconData} alt=""/>:<Gamepad2 size={38}/>}</div><div><span className="eyebrow">{game.engine.toUpperCase()}</span><h1>{game.name}</h1><p>{game.runtime||game.engine}{game.architecture?` · ${game.architecture}`:""} · <b>{game.status}</b></p></div></div>
       <div className="game-summary-strip"><div><span>Idioma detectado</span><b>{(game.detectedLanguage||"?").toUpperCase()} <small>{Math.round((game.languageConfidence||0)*100)}%</small></b></div><div><span>Fluxo selecionado</span><b>{source.toUpperCase()||"—"} <i>→</i> {target.toUpperCase()||"—"}</b></div><div><span>Modelo universal</span><b className={selectedModel?.installed?"summary-ready":""}>{selectedModel?.installed?"Instalado":"Necessário"}</b></div></div>
-      <button className="primary" disabled={!selectedModel||saving} onClick={save}>{saving?"Salvando…":"Salvar configuração"}</button>
+      <button className="primary" disabled={!flowReady||saving} onClick={save}>{saving?"Salvando…":"Salvar configuração"}</button>
+      {flowTarget && createPortal(<div className="in-editor-flow"><div className="editor-title"><div><span>TRADUÇÃO</span><h2>Configuração do jogo</h2></div><span className={`pill ${installed?"success":"neutral"}`}>{installed?"MODELOS INSTALADOS":"MODELOS NECESSÁRIOS"}</span></div><div className="flow-mode-picker"><button type="button" className={flowMode==="direct"?"selected":""} onClick={()=>setFlowMode("direct")}><b>1 → 2</b><span>Fluxo padrão</span></button>{(experimentalEnabled||game.flowMode==="chain")&&<button type="button" className={flowMode==="chain"?"selected":""} onClick={()=>setFlowMode("chain")}><b>1 → EN → 2</b><span>Experimental · duas etapas</span></button>}</div>{flowMode==="chain"?<><p className="chain-note">O inglês fica sempre ativo como intermediário. A tradução usa os dois modelos na mesma instância local.</p><div className="form-row chain-form"><label>Idioma original<UiSelect value={source} options={sources.map(item=>({value:item.code,label:item.name}))} onChange={setSource} ariaLabel="Idioma original"/></label><label>Intermediário<UiSelect value="en" options={[{value:"en",label:"English"}]} onChange={()=>undefined} ariaLabel="Idioma intermediário fixo"/></label><label>Destino<UiSelect value={target} options={destinations.map(model=>({value:model.toCode,label:model.toName}))} onChange={setTarget} ariaLabel="Destino"/></label></div></>:<div className="form-row"><label>Idioma original<UiSelect value={source} options={sources.map(item=>({value:item.code,label:item.name}))} onChange={setSource} ariaLabel="Idioma original"/></label><label>Destino disponível<UiSelect value={target} options={destinations.map(model=>({value:model.toCode,label:model.toName}))} onChange={setTarget} ariaLabel="Destino disponível"/></label></div>}<div className="flow-result"><span>{flowMode==="chain"?`${source.toUpperCase()} → EN → ${target.toUpperCase()}`:`${source.toUpperCase()} → ${target.toUpperCase()}`}</span><b>{installed?"Pronto para usar":flowReady?"Modelos serão baixados ao salvar":"Fluxo indisponível"}</b></div></div>, flowTarget)}
     </section>
     <section className="game-config-panel">
       <div className="game-file-card"><span>EXECUTÁVEL DO JOGO</span><strong>{executableName}</strong><code title={game.executablePath}>{gameDirectory}</code><div className="game-file-facts"><div><span>Motor</span><b>{game.engine}</b></div><div><span>Runtime</span><b>{game.runtime||"Padrão"}</b></div><div><span>Arquitetura</span><b>{game.architecture||"Automática"}</b></div><div><span>Estado</span><b>{game.status}</b></div></div><div className="game-integration-row"><span>Integração instalada no jogo</span><b>{game.integrationStatus||"Será verificada ao iniciar"}</b></div><div className="game-cache-actions"><div><span>Cache de tradução</span><b>{game.engine === "Ren'Py" ? `${source.toUpperCase()} → ${target.toUpperCase()} separado` : `XUnity · ${target.toUpperCase()}`}</b></div><button className="secondary" onClick={onOpenCache}>Abrir</button><button className="secondary" onClick={onClearCache}>Limpar</button></div></div>
@@ -390,16 +412,23 @@ function GameDetails({ game, models, onBack, onRemove, onSave, onOpenCache, onCl
   </div>;
 }
 
-function Wizard({ existingGame: game, models, onSave }: { existingGame?:Game; models:TranslationModel[]; onSave:(game:Game,source:string,target:string)=>void }) {
+function Wizard({ existingGame: game, models, experimentalEnabled, onSave }: { existingGame?:Game; models:TranslationModel[]; experimentalEnabled:boolean; onSave:(game:Game,source:string,target:string,flowMode:"direct"|"chain",intermediate?:string)=>void }) {
   const sources=useMemo(()=>Array.from(new Map(models.map(model=>[model.fromCode,{code:model.fromCode,name:model.fromName}])).values()).sort((a,b)=>a.name.localeCompare(b.name)),[models]);
   const installedModels=useMemo(()=>models.filter(model=>model.installed).sort((a,b)=>`${a.fromName}${a.toName}`.localeCompare(`${b.fromName}${b.toName}`)),[models]);
   const detected=game?.detectedLanguage || game?.sourceLanguage || "";
   const initialSource=sources.some(item=>item.code===detected)?detected:(sources[0]?.code||"");
   const [source,setSource]=useState(initialSource);
-  const destinations=useMemo(()=>models.filter(model=>model.fromCode===source).sort((a,b)=>a.toName.localeCompare(b.toName)),[models,source]);
+  const [flowMode,setFlowMode]=useState<"direct"|"chain">("direct");
+  const directDestinations=useMemo(()=>models.filter(model=>model.fromCode===source).sort((a,b)=>a.toName.localeCompare(b.toName)),[models,source]);
+  const chainDestinations=useMemo(()=>models.filter(model=>model.fromCode==="en"&&model.toCode!=="en"&&models.some(first=>first.fromCode===source&&first.toCode==="en")).sort((a,b)=>a.toName.localeCompare(b.toName)),[models,source]);
+  const destinations=flowMode==="chain"?chainDestinations:directDestinations;
   const [target,setTarget]=useState(game?.targetLanguage || "");
-  useEffect(()=>{if(!destinations.some(model=>model.toCode===target))setTarget(destinations[0]?.toCode||"");},[source,models]);
+  useEffect(()=>{if(!destinations.some(model=>model.toCode===target))setTarget(destinations[0]?.toCode||"");},[source,models,flowMode]);
   const selectedModel=models.find(model=>model.fromCode===source&&model.toCode===target);
+  const chainModels=[models.find(model=>model.fromCode===source&&model.toCode==="en"),models.find(model=>model.fromCode==="en"&&model.toCode===target)];
+  const requiredModels=flowMode==="chain"?chainModels:[selectedModel];
+  const flowReady=requiredModels.length>0&&requiredModels.every(Boolean);
+  const installed=flowReady&&requiredModels.every(model=>model?.installed);
   if (!game) return null;
   return <div className="page wizard-page"><section className="wizard-card wizard-card-fit">
     <div className="step done"><b>1</b><span>Jogo identificado</span></div>
@@ -408,10 +437,12 @@ function Wizard({ existingGame: game, models, onSave }: { existingGame?:Game; mo
     <div className="wizard-analysis">
       <div className="analysis-head"><div className={`game-cover ${game.engine === "Unity"?"unity":"renpy"}`}>{game.iconData?<img src={game.iconData} alt=""/>:<Gamepad2/>}</div><div><span className="pill neutral">{game.engine}</span><h2>{game.name}</h2><p>{game.runtime} · {game.architecture} · {game.integrationStatus}</p></div></div>
       <div className="confidence"><Languages size={20}/><div><b>Idioma detectado: {(game.detectedLanguage||"?").toUpperCase()}</b><span>Confiabilidade da análise</span></div><strong>{Math.round((game.languageConfidence||0)*100)}%</strong></div>
+      <div className="flow-mode-picker"><button type="button" className={flowMode==="direct"?"selected":""} onClick={()=>setFlowMode("direct")}><b>1 → 2</b><span>Fluxo padrão</span></button>{experimentalEnabled&&<button type="button" className={flowMode==="chain"?"selected":""} onClick={()=>setFlowMode("chain")}><b>1 → EN → 2</b><span>Experimental · duas etapas</span></button>}</div>
+      {flowMode==="chain"&&<p className="chain-note">Traduz por {source.toUpperCase()} → EN → {target.toUpperCase()} na mesma instância local. A primeira tradução pode levar mais tempo.</p>}
       <div className="form-row"><label>Idioma original<UiSelect value={source} options={sources.map(item=>({value:item.code,label:item.name}))} onChange={setSource} ariaLabel="Idioma original"/></label><label>Fluxos disponíveis a partir de {sources.find(item=>item.code===source)?.name||source}<UiSelect value={target} options={destinations.map(model=>({value:model.toCode,label:model.toName}))} onChange={setTarget} ariaLabel="Destino disponível"/></label></div>
       {installedModels.length>0&&<div className="installed-flow-picker"><div><b>Modelos já instalados</b><span>Selecione um par para preencher os dois idiomas.</span></div><div className="installed-flow-list">{installedModels.map(model=><button key={model.id} className={source===model.fromCode&&target===model.toCode?"selected":""} onClick={()=>{setSource(model.fromCode);setTarget(model.toCode);}}><span>{model.fromCode.toUpperCase()}</span><ChevronRight size={12}/><span>{model.toCode.toUpperCase()}</span><small className="flow-flags" aria-label={`${model.fromName} para ${model.toName}`}><LanguageFlag code={model.fromCode} name={model.fromName}/><ChevronRight size={10}/><LanguageFlag code={model.toCode} name={model.toName}/></small></button>)}</div></div>}
-      <div className="flow-result"><span>{source.toUpperCase()} → {target.toUpperCase()}</span><b>{selectedModel?.installed?"Modelo instalado":selectedModel?"Disponível para baixar":"Fluxo indisponível"}</b></div>
-      <button className="primary wizard-next" disabled={!selectedModel} onClick={()=>selectedModel&&onSave(game,source,target)}>Salvar e continuar<ChevronRight size={16}/></button>
+      <div className="flow-result"><span>{flowMode==="chain"?`${source.toUpperCase()} → EN → ${target.toUpperCase()}`:`${source.toUpperCase()} → ${target.toUpperCase()}`}</span><b>{installed?"Modelos instalados":flowReady?"Disponível para baixar":"Fluxo indisponível"}</b></div>
+      <button className="primary wizard-next" disabled={!flowReady} onClick={()=>flowReady&&onSave(game,source,target,flowMode,flowMode==="chain"?"en":undefined)}>Salvar e continuar<ChevronRight size={16}/></button>
     </div>
   </section></div>;
 }
@@ -455,7 +486,7 @@ function Models({ models, games, onOpenGame, onDelete, onDownload }: { models: T
 
 function Diagnostics({ health }: { health: EngineHealth[] }) { return <div className="page"><PageHeading eyebrow="SAÚDE DO SISTEMA" title="Diagnósticos" text="Uma leitura honesta dos componentes legados encontrados nesta instalação."/><section className="diagnostic-grid">{health.map(h=><article key={h.engine}><div className="diag-head"><div className="panel-icon"><Wrench size={20}/></div><div><h3>Motor {h.engine}</h3><p>{h.details}</p></div></div><Check label="Código-fonte" value={h.sourceFound}/><Check label="Runtime empacotado" value={h.runtimeFound}/><Check label="Modelo offline" value={h.modelFound}/></article>)}<article className="diag-coming"><div className="diag-head"><div className="panel-icon"><Gamepad2 size={20}/></div><div><h3>Motor RPGM</h3><p>Suporte planejado para jogos RPG Maker.</p></div></div><span className="pill neutral">Em breve</span><p>O diagnóstico e a instalação serão liberados em uma próxima atualização.</p></article><article className="diag-coming"><div className="diag-head"><div className="panel-icon"><Activity size={20}/></div><div><h3>Próximo motor</h3><p>Ajude a definir qual integração será desenvolvida a seguir.</p></div></div><span className="pill neutral">Votação · em breve</span><p>A votação aparecerá aqui quando a próxima rodada estiver disponível.</p></article></section></div>; }
 function Check({label,value}:{label:string;value:boolean}) { return <div className="check"><span>{label}</span><b className={value?"good":"muted"}>{value?"Encontrado":"Não confirmado"}</b></div>; }
-function SettingsPage() { return <div className="page"><PageHeading eyebrow="PREFERÊNCIAS" title="Configurações" text="A nova base manterá modelos e dados fora das pastas dos jogos."/><section className="settings-card"><div><h3>Tema</h3><p>Interface escura</p><span className="switch on"><i/></span></div><div><h3>Idioma da interface</h3><p>Português (Brasil)</p><button className="secondary">Alterar</button></div><div><h3>Modo avançado</h3><p>Exibe runtime, arquitetura e logs técnicos</p><span className="switch"><i/></span></div></section></div>; }
+function SettingsPage({settings,onChange}:{settings:AppSettings;onChange:(settings:AppSettings)=>void}) { return <div className="page"><PageHeading eyebrow="PREFERÊNCIAS" title="Configurações" text="A nova base manterá modelos e dados fora das pastas dos jogos."/><section className="settings-card"><div><h3>Tema</h3><p>Interface escura</p><span className="switch on"><i/></span></div><div><h3>Idioma da interface</h3><p>Português (Brasil)</p><button className="secondary">Alterar</button></div><div className="experimental-setting"><div><h3>Fluxo encadeado experimental</h3><p>Libera 1 → EN → 2 quando não existir modelo direto. Usa duas etapas no mesmo servidor local.</p></div><button type="button" className={`switch ${settings.enableExperimentalChainedFlow?"on":""}`} aria-pressed={settings.enableExperimentalChainedFlow} onClick={()=>onChange({...settings,enableExperimentalChainedFlow:!settings.enableExperimentalChainedFlow})}><i/></button></div></section></div>; }
 function DownloadsPage({tasks}:{tasks:DownloadTask[]}) { return <div className="page"><PageHeading eyebrow="OPERAÇÕES" title="Downloads" text="Acompanhe modelos e componentes sem bloquear o restante do aplicativo."/>{tasks.length?<section className="downloads-list">{tasks.map(task=><article key={task.id} className={task.status}><div className="download-status">{task.status==="baixando"?<span className="spinner"/>:task.status==="concluído"?<Activity size={19}/>:<X size={19}/>}</div><div className="download-copy"><h3>{task.name}</h3><p>{task.detail}</p>{task.status==="baixando"&&<div className="progress-track"><i style={{width:`${task.progress}%`}}/></div>}</div><span className="download-label">{task.status}</span></article>)}</section>:<section className="empty-card compact"><div className="panel-icon"><Download size={24}/></div><h2>Nenhum download por enquanto</h2><p>Os modelos iniciados em Modelos Universais aparecerão aqui.</p></section>}</div>; }
 function SessionPage({game,lines,running,onBack,onRestart}:{game:Game;lines:SessionLine[];running:boolean;onBack:()=>void;onRestart:()=>void}) {
   const outputRef=useRef<HTMLDivElement>(null);
