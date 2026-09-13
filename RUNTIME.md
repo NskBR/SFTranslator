@@ -1,12 +1,12 @@
 # Motores integrados do SFTranslator
 
-Todo o projeto fica em `uat-desktop-tauri/`: `engines/` contém os adaptadores, `scripts/` as ferramentas, `.venv/` o ambiente de build, `logs/` os registros locais e `docs/history/` a documentação histórica. Os documentos históricos descrevem etapas anteriores e não são instruções do build atual.
+A raiz do repositório é a raiz do aplicativo: `engines/` contém os adaptadores, `scripts/` as ferramentas, `.venv/` o ambiente de build, `logs/` os registros locais e `docs/history/` a documentação histórica. Os documentos históricos descrevem etapas anteriores e não são instruções do build atual.
 
 O instalador inclui os executáveis congelados, Python, bibliotecas nativas e MiniSBD. O usuário final não instala Python, pip ou LibreTranslate.
 
 ## Organização
 
-- `uat-desktop-tauri`: interface, biblioteca, catálogo, downloads e controle dos servidores.
+- `src/` e `src-tauri/`: interface, biblioteca, catálogo, downloads e controle dos servidores.
 - `engines/uat-renpy`: fontes do adaptador Ren'Py e servidor LibreTranslate. Os hooks são copiados para o jogo; o servidor permanece no aplicativo.
 - `engines/uat-unity`: fontes do adaptador Unity, servidor Argos com API de tradução e instalador BepInEx/XUnity.
 
@@ -24,7 +24,7 @@ npm run tauri dev
 npm run release
 ```
 
-`runtimes` cria `.venv` dentro de `uat-desktop-tauri`, instala `scripts/runtime-requirements.txt` e compila os motores. MiniSBD entra no pacote; modelos de tradução pessoais não entram. `release` executa essa preparação automaticamente. A compilação Rust de distribuição rejeita motores ausentes.
+Na raiz do repositório, `runtimes` cria `.venv`, instala `scripts/runtime-requirements.txt` e compila os motores. MiniSBD entra no pacote; modelos de tradução pessoais não entram. `release` executa essa preparação automaticamente. A compilação Rust de distribuição rejeita motores ausentes.
 
 ```text
 SFTranslator/
