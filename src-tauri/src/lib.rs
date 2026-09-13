@@ -8,11 +8,13 @@ use std::{
     process::{Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     time::{Duration, Instant},
 };
 use tauri::{AppHandle, Emitter, Manager};
+
+static ACTIVE_GAME_PID: Mutex<Option<u32>> = Mutex::new(None);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1191,7 +1193,11 @@ fn run_game_session(app: AppHandle, game: Game, project: PathBuf) -> Result<i32,
     let mut command = Command::new(&executable);
     command.current_dir(game_root).env("SFTRANSLATOR_MANAGED_RUNTIME", "1");
     let mut child = spawn_streaming(command, &app, "jogo")?;
+    *ACTIVE_GAME_PID.lock().map_err(|_| "Não foi possível registrar o processo do jogo.")? = Some(child.id());
     let code = wait_for_game_exit(&mut child, session_marker.as_deref(), &app);
+    if let Ok(mut pid) = ACTIVE_GAME_PID.lock() {
+        *pid = None;
+    }
     session_log(
         &app,
         "system",
@@ -1263,6 +1269,27 @@ fn models_directory(app: &AppHandle) -> Result<PathBuf, String> {
         fs::create_dir_all(&destination).map_err(|e| e.to_string())?;
     }
     Ok(destination)
+}
+
+#[tauri::command]
+fn stop_game_session() -> Result<(), String> {
+    let pid = ACTIVE_GAME_PID
+        .lock()
+        .map_err(|_| "Não foi possível acessar a sessão atual.")?
+        .ok_or("Nenhum jogo está em execução.")?;
+    #[cfg(windows)]
+    {
+        let status = Command::new("taskkill.exe")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .status()
+            .map_err(|error| format!("Não foi possível encerrar o jogo: {error}"))?;
+        if !status.success() {
+            return Err("O Windows não conseguiu encerrar o jogo.".into());
+        }
+    }
+    #[cfg(not(windows))]
+    return Err("Encerrar jogos pela interface está disponível apenas no Windows.".into());
+    Ok(())
 }
 
 fn runtime_directory(app: &AppHandle) -> Result<PathBuf, String> {
@@ -1381,6 +1408,7 @@ pub fn run() {
             delete_model,
             download_model,
             launch_game,
+            stop_game_session,
             engine_health,
             list_models
         ])

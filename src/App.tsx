@@ -9,7 +9,7 @@ import logo from "./assets/sftranslator-logo-v2.png";
 import {
   Activity, Box, ChevronLeft, ChevronRight, CircleHelp, Download, Gamepad2,
   ChevronDown, Languages, LayoutGrid, Library, List, Maximize2, Minus, Play, Plus, Search,
-  Settings, Trash2, Wrench, X, Pencil, Terminal
+  Settings, Trash2, Wrench, X, Pencil, Terminal, Square
 } from "lucide-react";
 import type { AppSettings, EngineHealth, Game, TranslationModel } from "./types";
 
@@ -17,8 +17,8 @@ type DownloadTask = {id:string; modelId:string; name:string; status:"baixando"|"
 type SessionLine = {kind:string; text:string};
 
 const navigation = [
-  ["Biblioteca", Library], ["Modelos", Box],
-  ["Downloads", Download], ["Console", Terminal], ["Diagnósticos", Activity]
+  ["Biblioteca", Library], ["Console", Terminal],
+  ["Modelos", Box], ["Downloads", Download], ["Diagnósticos", Activity]
 ] as const;
 
 const DEFAULT_SIDEBAR_WIDTH = 240;
@@ -147,6 +147,11 @@ function App() {
     const timeout = window.setTimeout(() => setToast(undefined), 4500);
     return () => window.clearTimeout(timeout);
   }, [toast]);
+  useEffect(() => {
+    if (!appWindow) return;
+    appWindow.setAlwaysOnTop(sessionRunning).catch(() => undefined);
+    return () => { appWindow.setAlwaysOnTop(false).catch(() => undefined); };
+  }, [appWindow, sessionRunning]);
 
   const addGame = async (): Promise<Game | undefined> => {
     const selected = await open({ multiple: false, filters: [{ name: "Executável do jogo", extensions: ["exe"] }] });
@@ -219,6 +224,12 @@ function App() {
     try { await invoke("launch_game", { gameId: game.id }); await refresh(); }
     catch (e) { setSessionRunning(false); setSessionLines([{kind:"error",text:String(e)}]); }
   };
+  const stopGame = async () => {
+    try {
+      await invoke("stop_game_session");
+      setToast("Encerrando o jogo…");
+    } catch (e) { setToast(String(e)); }
+  };
 
   const removeGame = async (game: Game) => {
     try {
@@ -280,10 +291,13 @@ function App() {
     return () => cleanups.forEach(cleanup => cleanup());
   }, [page, selectedGame?.id, models]);
 
-  const filtered = useMemo(() => games.filter(game => {
-    const matchesFilter = filter === "Todos" || game.engine === filter;
-    return matchesFilter && game.name.toLowerCase().includes(query.toLowerCase());
-  }), [games, query, filter]);
+  const filtered = useMemo(() => games
+    .filter(game => (filter === "Todos" || game.engine === filter) && game.name.toLowerCase().includes(query.toLowerCase()))
+    .sort((left, right) => {
+      if (left.id === sessionGame?.id) return -1;
+      if (right.id === sessionGame?.id) return 1;
+      return (Date.parse(right.lastLaunch || "") || 0) - (Date.parse(left.lastLaunch || "") || 0);
+    }), [games, query, filter, sessionGame?.id]);
 
   const openGameDetails = (game: Game) => {
     setSelectedGame(game);
@@ -316,7 +330,7 @@ function App() {
     <div className={`workspace ${isResizingSidebar ? "workspace-resizing" : ""}`}>
       <aside ref={sidebarRef} className={isSidebarCompact ? "sidebar-compact" : ""} style={{ width: sidebarWidth }}>
         <div className="sidebar-brand"><img src={logo} alt="SFTranslator"/></div>
-        <nav>{navigation.map(([label, Icon],index) => <Fragment key={label}>{index===0&&<span className="nav-group-label">Biblioteca</span>}{index===1&&<span className="nav-group-label">Ferramentas</span>}<button title={isSidebarCompact ? label : undefined} className={page === label ? "active" : ""} onClick={() => setPage(label)}><Icon size={18}/><span>{label}</span>{label === "Biblioteca" && <b className="nav-count">{games.length}</b>}</button></Fragment>)}</nav>
+        <nav>{navigation.map(([label, Icon],index) => <Fragment key={label}>{index===0&&<span className="nav-group-label">Biblioteca</span>}{index===2&&<span className="nav-group-label">Ferramentas</span>}<button title={isSidebarCompact ? label : undefined} className={page === label ? "active" : ""} onClick={() => setPage(label)}><Icon size={18}/><span>{label}</span>{label === "Biblioteca" && <b className="nav-count">{games.length}</b>}{label === "Console" && sessionRunning && <i className="console-live-dot" aria-label="Sessão ativa"/>}</button></Fragment>)}</nav>
         <section className="sidebar-overview"><span>VISÃO GERAL</span><div><button onClick={()=>setPage("Biblioteca")}><b>{games.length}</b><small>{games.length===1?"Jogo":"Jogos"}</small></button><button onClick={()=>setPage("Modelos")}><b>{installedModelCount}</b><small>{installedModelCount===1?"Modelo":"Modelos"}</small></button></div><p><i className={`dot ${sessionRunning?"ok":""}`}/>{sessionRunning?"Tradução em andamento":"Aplicativo pronto"}</p></section>
         <div className="sidebar-footer"><button className={page === "Configurações" ? "active" : ""} title="Configurações" onClick={() => setPage("Configurações")}><Settings size={18}/></button><button className={page === "Sobre" ? "active" : ""} title="Sobre" onClick={() => setPage("Sobre")}><CircleHelp size={18}/></button></div>
         <div className="sidebar-resizer" role="separator" aria-label="Redimensionar barra lateral" aria-orientation="vertical" onMouseDown={startSidebarResize} onDoubleClick={toggleSidebarWidth}/>
@@ -324,12 +338,12 @@ function App() {
       <main>
         {page === "Biblioteca" && (selectedGame
           ? <GameDetails game={selectedGame} models={models} experimentalEnabled={settings.enableExperimentalChainedFlow} onBack={() => setSelectedGame(undefined)} onRemove={() => setGamePendingDeletion(selectedGame)} onSave={configureGame} onOpenCache={() => openGameCache(selectedGame)} onClearCache={() => clearGameCache(selectedGame)}/>
-          : <LibraryPage games={filtered} filter={filter} setFilter={setFilter} query={query} setQuery={setQuery} onAddGame={beginAddGame} onSelect={setSelectedGame} onLaunch={launchGame} onDelete={setGamePendingDeletion} activeGameId={sessionRunning ? sessionGame?.id : undefined} onConsole={() => setPage("Console")}/>)}
+          : <LibraryPage games={filtered} filter={filter} setFilter={setFilter} query={query} setQuery={setQuery} onAddGame={beginAddGame} onSelect={setSelectedGame} onLaunch={launchGame} onStop={stopGame} onDelete={setGamePendingDeletion} activeGameId={sessionRunning ? sessionGame?.id : undefined} onConsole={() => setPage("Console")}/>)}
         {page === "Adicionar jogo" && <Wizard existingGame={selectedGame} models={models} experimentalEnabled={settings.enableExperimentalChainedFlow} onSave={configureGame}/>}
         {page === "Modelos" && <Models models={models} games={games} onOpenGame={openGameDetails} onDelete={deleteModel} onDownload={downloadModel}/>} 
         {page === "Downloads" && <DownloadsPage tasks={downloads}/>} 
         {page === "Console" && sessionGame && (
-          <SessionPage game={sessionGame} lines={sessionLines} running={sessionRunning} onBack={() => setPage("Biblioteca")} onRestart={() => launchGame(sessionGame)}/>
+          <SessionPage game={sessionGame} lines={sessionLines} running={sessionRunning} onBack={() => setPage("Biblioteca")} onRestart={() => launchGame(sessionGame)} onStop={stopGame}/>
         )}
         {page === "Console" && !sessionGame && <EmptyPage icon={Terminal} title="Console" text="Inicie um jogo pela biblioteca para acompanhar a instalação e a tradução. O histórico da última sessão fica disponível aqui enquanto o aplicativo estiver aberto."/>}
         {page === "Diagnósticos" && <Diagnostics health={health}/>} 
@@ -353,7 +367,7 @@ function PageHeading({ eyebrow, title, text, action }: { eyebrow?: string; title
   return <div className="page-heading"><div>{eyebrow && <span className="eyebrow">{eyebrow}</span>}<h1>{title}</h1><p>{text}</p></div>{action}</div>;
 }
 
-function LibraryPage({ games, filter, setFilter, query, setQuery, onAddGame, onSelect, onLaunch, onDelete, activeGameId, onConsole }: { games: Game[]; filter: string; setFilter: (v:string)=>void; query:string; setQuery:(v:string)=>void; onAddGame:()=>void; onSelect:(game:Game)=>void; onLaunch:(game:Game)=>void; onDelete:(game:Game)=>void; activeGameId?:string; onConsole:()=>void }) {
+function LibraryPage({ games, filter, setFilter, query, setQuery, onAddGame, onSelect, onLaunch, onStop, onDelete, activeGameId, onConsole }: { games: Game[]; filter: string; setFilter: (v:string)=>void; query:string; setQuery:(v:string)=>void; onAddGame:()=>void; onSelect:(game:Game)=>void; onLaunch:(game:Game)=>void; onStop:()=>void; onDelete:(game:Game)=>void; activeGameId?:string; onConsole:()=>void }) {
   const cardClickTimer = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => () => clearTimeout(cardClickTimer.current), []);
   const [view,setView]=useState<"list"|"grid">(()=>{try{return localStorage.getItem("sftranslator_library_view")==="grid"?"grid":"list";}catch{return "list";}});
@@ -364,18 +378,18 @@ function LibraryPage({ games, filter, setFilter, query, setQuery, onAddGame, onS
     {games.length === 0
       ? <section className="empty-card library-empty"><div className="empty-art"><div/><Gamepad2 size={38}/></div><h2>Nenhum jogo na biblioteca</h2><p>Use “Adicionar jogo” acima para selecionar um executável e preparar a tradução.</p><div className="empty-steps"><div><b>1</b><span><strong>Selecione o jogo</strong><small>Escolha o executável principal.</small></span></div><div><b>2</b><span><strong>Defina o fluxo</strong><small>Use um modelo instalado ou baixe outro.</small></span></div><div><b>3</b><span><strong>Inicie e traduza</strong><small>Acompanhe tudo pelo console interno.</small></span></div></div></section>
       : <section className={`game-grid view-${view}`}>
-          {games.map(game=><article className={`game-card ${game.status === "Pronto" ? "ready" : "pending"}`} key={game.id} onClick={event=>{if(game.id===activeGameId && !(event.target as HTMLElement).closest("button")){clearTimeout(cardClickTimer.current);cardClickTimer.current=setTimeout(onConsole,350);}}} onDoubleClick={event=>{if(!(event.target as HTMLElement).closest("button")){clearTimeout(cardClickTimer.current);onSelect(game);}}}>
+          {games.map(game=>{const isRunning=game.id===activeGameId;const visibleStatus=isRunning?"EXECUTANDO":game.status;return <article className={`game-card ${isRunning?"running":""}`} key={game.id} onClick={event=>{if(isRunning && !(event.target as HTMLElement).closest("button")){clearTimeout(cardClickTimer.current);cardClickTimer.current=setTimeout(onConsole,350);}}} onDoubleClick={event=>{if(!(event.target as HTMLElement).closest("button")){clearTimeout(cardClickTimer.current);onSelect(game);}}}>
             <div className={`game-cover ${game.engine === "Unity" ? "unity" : "renpy"}`}>{game.iconData ? <img src={game.iconData} alt={`Ícone de ${game.name}`}/> : <Gamepad2 size={34}/>}</div>
             <div className="game-info">
               <div className="game-title"><div><h3>{game.name}</h3><span className="engine-tag">{game.engine}</span></div><p>{game.executablePath}</p></div>
               <div className="game-meta">
                 <div className="language-pair" title="Fluxo de tradução">{game.flowMode==="chain"?<><LanguageFlag code={game.sourceLanguage} name={game.sourceLanguage.toUpperCase()}/><ChevronRight size={12}/><LanguageFlag code="en" name="English"/><ChevronRight size={12}/><LanguageFlag code={game.targetLanguage} name={game.targetLanguage.toUpperCase()}/></>:game.modelInstalled?<><LanguageFlag code={game.sourceLanguage} name={game.sourceLanguage.toUpperCase()}/><ChevronRight size={12}/><LanguageFlag code={game.targetLanguage} name={game.targetLanguage.toUpperCase()}/></>:<span>Sem modelo</span>}</div>
-                <div className="status"><i className={`dot ${game.status === "Pronto" ? "ok" : "warn"}`}/>{game.status === "Instalação pendente" ? "Abra o jogo para iniciar a instalação" : game.status}</div>
+                <div className="status"><i className={`dot ${isRunning?"ok":game.status === "Instalação pendente"?"warn":""}`}/>{isRunning?visibleStatus:game.status === "Instalação pendente" ? "Abra o jogo para iniciar a instalação" : visibleStatus}</div>
               </div>
             </div>
             <time className="game-last-launch"><span>Última execução</span><b>{game.lastLaunch?new Date(game.lastLaunch).toLocaleString("pt-BR",{dateStyle:"short",timeStyle:"short"}):"Nunca iniciado"}</b></time>
-            <div className="row-actions"><button className="play-action" onClick={()=>game.id===activeGameId ? onConsole() : onLaunch(game)} title={game.id===activeGameId ? "Abrir console" : "Iniciar jogo"} aria-label={game.id===activeGameId ? `Abrir console de ${game.name}` : `Iniciar ${game.name}`}>{game.id===activeGameId ? <Terminal size={17}/> : <Play size={17} fill="currentColor"/>}</button><button className="more-action" onClick={()=>onSelect(game)} title="Editar jogo"><Pencil size={15}/></button><button className="model-delete" onClick={()=>onDelete(game)} title="Remover jogo" aria-label={`Remover ${game.name}`}><Trash2 size={15}/></button></div>
-          </article>)}
+            <div className="row-actions">{game.id===activeGameId?<><button className="play-action" onClick={onConsole} title="Abrir console" aria-label={`Abrir console de ${game.name}`}><Terminal size={17}/></button><button className="stop-action" onClick={onStop} title="Encerrar jogo" aria-label={`Encerrar ${game.name}`}><Square size={13} fill="currentColor"/></button></>:<button className="play-action" onClick={()=>onLaunch(game)} title="Iniciar jogo" aria-label={`Iniciar ${game.name}`}><Play size={17} fill="currentColor"/></button>}<button className="more-action" onClick={()=>onSelect(game)} title="Editar jogo"><Pencil size={15}/></button><button className="model-delete" onClick={()=>onDelete(game)} title="Remover jogo" aria-label={`Remover ${game.name}`}><Trash2 size={15}/></button></div>
+          </article>})}
         </section>}
   </div>;
 }
@@ -496,7 +510,7 @@ function Diagnostics({ health }: { health: EngineHealth[] }) { return <div class
 function Check({label,value}:{label:string;value:boolean}) { return <div className="check"><span>{label}</span><b className={value?"good":"muted"}>{value?"Encontrado":"Não confirmado"}</b></div>; }
 function SettingsPage({settings,onChange}:{settings:AppSettings;onChange:(settings:AppSettings)=>void}) { return <div className="page"><PageHeading eyebrow="PREFERÊNCIAS" title="Configurações" text="A nova base manterá modelos e dados fora das pastas dos jogos."/><section className="settings-card"><div><h3>Tema</h3><p>Interface escura</p><span className="switch on"><i/></span></div><div><h3>Idioma da interface</h3><p>Português (Brasil)</p><button className="secondary">Alterar</button></div><div className="experimental-setting"><div><h3>Fluxo encadeado experimental</h3><p>Libera 1 → EN → 2 quando não existir modelo direto. Usa duas etapas no mesmo servidor local.</p></div><button type="button" className={`switch ${settings.enableExperimentalChainedFlow?"on":""}`} aria-pressed={settings.enableExperimentalChainedFlow} onClick={()=>onChange({...settings,enableExperimentalChainedFlow:!settings.enableExperimentalChainedFlow})}><i/></button></div></section></div>; }
 function DownloadsPage({tasks}:{tasks:DownloadTask[]}) { return <div className="page"><PageHeading eyebrow="OPERAÇÕES" title="Downloads" text="Acompanhe modelos e componentes sem bloquear o restante do aplicativo."/>{tasks.length?<section className="downloads-list">{tasks.map(task=><article key={task.id} className={task.status}><div className="download-status">{task.status==="baixando"?<span className="spinner"/>:task.status==="concluído"?<Activity size={19}/>:<X size={19}/>}</div><div className="download-copy"><h3>{task.name}</h3><p>{task.detail}</p>{task.status==="baixando"&&<div className="progress-track"><i style={{width:`${task.progress}%`}}/></div>}</div><span className="download-label">{task.status}</span></article>)}</section>:<section className="empty-card compact"><div className="panel-icon"><Download size={24}/></div><h2>Nenhum download por enquanto</h2><p>Os modelos iniciados em Modelos Universais aparecerão aqui.</p></section>}</div>; }
-function SessionPage({game,lines,running,onBack,onRestart}:{game:Game;lines:SessionLine[];running:boolean;onBack:()=>void;onRestart:()=>void}) {
+function SessionPage({game,lines,running,onBack,onRestart,onStop}:{game:Game;lines:SessionLine[];running:boolean;onBack:()=>void;onRestart:()=>void;onStop:()=>void}) {
   const outputRef=useRef<HTMLDivElement>(null);
   const followOutput=useRef(true);
 
@@ -522,7 +536,7 @@ function SessionPage({game,lines,running,onBack,onRestart}:{game:Game;lines:Sess
   };
 
   return <div className="session-page">
-    <header><button className="back-button" onClick={onBack}><ChevronLeft size={15}/>Biblioteca</button><div className="session-actions"><div><span className={`session-dot ${running?"live":""}`}/><b>{game.name}</b><small>{running?"tradução em tempo real":"jogo encerrado"}</small></div>{!running&&<button className="primary session-restart" onClick={onRestart}><Play size={15}/>Iniciar novamente</button>}</div></header>
+    <header><button className="back-button" onClick={onBack}><ChevronLeft size={15}/>Biblioteca</button><div className="session-actions"><div><span className={`session-dot ${running?"live":""}`}/><b>{game.name}</b><small>{running?"tradução em tempo real":"jogo encerrado"}</small></div>{running?<button className="stop-action session-stop" onClick={onStop}><Square size={12} fill="currentColor"/>Encerrar jogo</button>:<button className="primary session-restart" onClick={onRestart}><Play size={15}/>Iniciar novamente</button>}</div></header>
     <section className="terminal">
       <div className="terminal-head"><span>SFTranslator runtime</span><span>{game.sourceLanguage.toUpperCase()} → {game.targetLanguage.toUpperCase()}</span></div>
       <div className="terminal-output" ref={outputRef} onScroll={updateScrollFollow}>{lines.length?lines.map((line,index)=><p key={index} className={line.kind}><i>{line.kind==="error"?"!":line.kind==="system"?"›":"·"}</i>{line.text}</p>):<p className="system"><i>›</i>Aguardando saída do motor de tradução…</p>}</div>
