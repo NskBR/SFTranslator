@@ -10,7 +10,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": "nsis",
     "resources": { "resources/runtimes/": "runtimes/" },
     "icon": [
       "icons/32x32.png",
