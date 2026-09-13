@@ -9,7 +9,7 @@ import logo from "./assets/sftranslator-logo-v2.png";
 import {
   Activity, Box, ChevronLeft, ChevronRight, CircleHelp, Download, Gamepad2,
   ChevronDown, Languages, LayoutGrid, Library, List, Maximize2, Minus, Play, Plus, Search,
-  Settings, Trash2, Wrench, X, Pencil
+  Settings, Trash2, Wrench, X, Pencil, Terminal
 } from "lucide-react";
 import type { AppSettings, EngineHealth, Game, TranslationModel } from "./types";
 
@@ -18,7 +18,7 @@ type SessionLine = {kind:string; text:string};
 
 const navigation = [
   ["Biblioteca", Library], ["Modelos", Box],
-  ["Downloads", Download], ["Diagnósticos", Activity]
+  ["Downloads", Download], ["Console", Terminal], ["Diagnósticos", Activity]
 ] as const;
 
 const DEFAULT_SIDEBAR_WIDTH = 240;
@@ -210,7 +210,12 @@ function App() {
   }
 
   const launchGame = async (game: Game) => {
-    setSessionGame(game); setSessionLines([]); setSessionRunning(true); setPage("Sessão");
+    if (sessionRunning) {
+      setPage("Console");
+      if (sessionGame?.id !== game.id) setToast(`Já existe uma sessão ativa: ${sessionGame?.name}. Encerre o jogo antes de iniciar outro.`);
+      return;
+    }
+    setSessionGame(game); setSessionLines([]); setSessionRunning(true); setPage("Console");
     try { await invoke("launch_game", { gameId: game.id }); await refresh(); }
     catch (e) { setSessionRunning(false); setSessionLines([{kind:"error",text:String(e)}]); }
   };
@@ -294,7 +299,7 @@ function App() {
         ? `${installedModelCount} de ${models.length} fluxos do catálogo estão instalados.`
         : page === "Downloads"
           ? `${downloads.filter(task => task.status === "baixando").length} em andamento · ${downloads.filter(task => task.status === "concluído").length} concluídos nesta sessão.`
-          : page === "Sessão"
+          : page === "Console"
             ? sessionRunning ? "Preparação do motor, servidor local e tradução em execução." : "Sessão encerrada; o histórico permanece disponível."
             : "SFTranslator monitora os componentes locais dos dois motores.";
 
@@ -319,13 +324,14 @@ function App() {
       <main>
         {page === "Biblioteca" && (selectedGame
           ? <GameDetails game={selectedGame} models={models} experimentalEnabled={settings.enableExperimentalChainedFlow} onBack={() => setSelectedGame(undefined)} onRemove={() => setGamePendingDeletion(selectedGame)} onSave={configureGame} onOpenCache={() => openGameCache(selectedGame)} onClearCache={() => clearGameCache(selectedGame)}/>
-          : <LibraryPage games={filtered} filter={filter} setFilter={setFilter} query={query} setQuery={setQuery} onAddGame={beginAddGame} onSelect={setSelectedGame} onLaunch={launchGame} onDelete={setGamePendingDeletion}/>)}
+          : <LibraryPage games={filtered} filter={filter} setFilter={setFilter} query={query} setQuery={setQuery} onAddGame={beginAddGame} onSelect={setSelectedGame} onLaunch={launchGame} onDelete={setGamePendingDeletion} activeGameId={sessionRunning ? sessionGame?.id : undefined} onConsole={() => setPage("Console")}/>)}
         {page === "Adicionar jogo" && <Wizard existingGame={selectedGame} models={models} experimentalEnabled={settings.enableExperimentalChainedFlow} onSave={configureGame}/>}
         {page === "Modelos" && <Models models={models} games={games} onOpenGame={openGameDetails} onDelete={deleteModel} onDownload={downloadModel}/>} 
         {page === "Downloads" && <DownloadsPage tasks={downloads}/>} 
-        {page === "Sessão" && sessionGame && (
+        {page === "Console" && sessionGame && (
           <SessionPage game={sessionGame} lines={sessionLines} running={sessionRunning} onBack={() => setPage("Biblioteca")} onRestart={() => launchGame(sessionGame)}/>
         )}
+        {page === "Console" && !sessionGame && <EmptyPage icon={Terminal} title="Console" text="Inicie um jogo pela biblioteca para acompanhar a instalação e a tradução. O histórico da última sessão fica disponível aqui enquanto o aplicativo estiver aberto."/>}
         {page === "Diagnósticos" && <Diagnostics health={health}/>} 
         {page === "Configurações" && <SettingsPage settings={settings} onChange={updateSettings}/>}
         {page === "Sobre" && <EmptyPage icon={Languages} title="SFTranslator" text="Uma biblioteca universal de tradução para jogos Ren'Py e Unity."/>}
@@ -347,7 +353,9 @@ function PageHeading({ eyebrow, title, text, action }: { eyebrow?: string; title
   return <div className="page-heading"><div>{eyebrow && <span className="eyebrow">{eyebrow}</span>}<h1>{title}</h1><p>{text}</p></div>{action}</div>;
 }
 
-function LibraryPage({ games, filter, setFilter, query, setQuery, onAddGame, onSelect, onLaunch, onDelete }: { games: Game[]; filter: string; setFilter: (v:string)=>void; query:string; setQuery:(v:string)=>void; onAddGame:()=>void; onSelect:(game:Game)=>void; onLaunch:(game:Game)=>void; onDelete:(game:Game)=>void }) {
+function LibraryPage({ games, filter, setFilter, query, setQuery, onAddGame, onSelect, onLaunch, onDelete, activeGameId, onConsole }: { games: Game[]; filter: string; setFilter: (v:string)=>void; query:string; setQuery:(v:string)=>void; onAddGame:()=>void; onSelect:(game:Game)=>void; onLaunch:(game:Game)=>void; onDelete:(game:Game)=>void; activeGameId?:string; onConsole:()=>void }) {
+  const cardClickTimer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => clearTimeout(cardClickTimer.current), []);
   const [view,setView]=useState<"list"|"grid">(()=>{try{return localStorage.getItem("sftranslator_library_view")==="grid"?"grid":"list";}catch{return "list";}});
   const changeView=(next:"list"|"grid")=>{setView(next);try{localStorage.setItem("sftranslator_library_view",next);}catch{/* noop */}};
   return <div className="page library-page">
@@ -356,7 +364,7 @@ function LibraryPage({ games, filter, setFilter, query, setQuery, onAddGame, onS
     {games.length === 0
       ? <section className="empty-card library-empty"><div className="empty-art"><div/><Gamepad2 size={38}/></div><h2>Nenhum jogo na biblioteca</h2><p>Use “Adicionar jogo” acima para selecionar um executável e preparar a tradução.</p><div className="empty-steps"><div><b>1</b><span><strong>Selecione o jogo</strong><small>Escolha o executável principal.</small></span></div><div><b>2</b><span><strong>Defina o fluxo</strong><small>Use um modelo instalado ou baixe outro.</small></span></div><div><b>3</b><span><strong>Inicie e traduza</strong><small>Acompanhe tudo pelo console interno.</small></span></div></div></section>
       : <section className={`game-grid view-${view}`}>
-          {games.map(game=><article className={`game-card ${game.status === "Pronto" ? "ready" : "pending"}`} key={game.id} onDoubleClick={event=>{if(!(event.target as HTMLElement).closest("button"))onSelect(game)}}>
+          {games.map(game=><article className={`game-card ${game.status === "Pronto" ? "ready" : "pending"}`} key={game.id} onClick={event=>{if(game.id===activeGameId && !(event.target as HTMLElement).closest("button")){clearTimeout(cardClickTimer.current);cardClickTimer.current=setTimeout(onConsole,350);}}} onDoubleClick={event=>{if(!(event.target as HTMLElement).closest("button")){clearTimeout(cardClickTimer.current);onSelect(game);}}}>
             <div className={`game-cover ${game.engine === "Unity" ? "unity" : "renpy"}`}>{game.iconData ? <img src={game.iconData} alt={`Ícone de ${game.name}`}/> : <Gamepad2 size={34}/>}</div>
             <div className="game-info">
               <div className="game-title"><div><h3>{game.name}</h3><span className="engine-tag">{game.engine}</span></div><p>{game.executablePath}</p></div>
@@ -366,7 +374,7 @@ function LibraryPage({ games, filter, setFilter, query, setQuery, onAddGame, onS
               </div>
             </div>
             <time className="game-last-launch"><span>Última execução</span><b>{game.lastLaunch?new Date(game.lastLaunch).toLocaleString("pt-BR",{dateStyle:"short",timeStyle:"short"}):"Nunca iniciado"}</b></time>
-            <div className="row-actions"><button className="play-action" onClick={()=>onLaunch(game)} title="Iniciar jogo"><Play size={17} fill="currentColor"/></button><button className="more-action" onClick={()=>onSelect(game)} title="Editar jogo"><Pencil size={15}/></button><button className="model-delete" onClick={()=>onDelete(game)} title="Remover jogo" aria-label={`Remover ${game.name}`}><Trash2 size={15}/></button></div>
+            <div className="row-actions"><button className="play-action" onClick={()=>game.id===activeGameId ? onConsole() : onLaunch(game)} title={game.id===activeGameId ? "Abrir console" : "Iniciar jogo"} aria-label={game.id===activeGameId ? `Abrir console de ${game.name}` : `Iniciar ${game.name}`}>{game.id===activeGameId ? <Terminal size={17}/> : <Play size={17} fill="currentColor"/>}</button><button className="more-action" onClick={()=>onSelect(game)} title="Editar jogo"><Pencil size={15}/></button><button className="model-delete" onClick={()=>onDelete(game)} title="Remover jogo" aria-label={`Remover ${game.name}`}><Trash2 size={15}/></button></div>
           </article>)}
         </section>}
   </div>;

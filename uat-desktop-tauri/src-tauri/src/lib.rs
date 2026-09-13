@@ -784,6 +784,10 @@ fn spawn_streaming(
     label: &str,
 ) -> Result<std::process::Child, String> {
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    command.env("SFTRANSLATOR_MANAGED_RUNTIME", "1");
+    if let Ok(runtime) = runtime_directory(app) {
+        command.env("UAT_SBD_DIR", runtime.join("minisbd"));
+    }
     hide_console(&mut command);
     let mut child = command
         .spawn()
@@ -914,11 +918,6 @@ fn install_renpy_hook(engine_root: &Path, game: &Game, app: &AppHandle) -> Resul
         serde_json::to_vec_pretty(&config).map_err(|error| error.to_string())?,
     )
     .map_err(|error| format!("Falha ao configurar o hook Ren'Py: {error}"))?;
-    fs::write(
-        engine_root.join("uat/uat_config.json"),
-        serde_json::to_vec_pretty(&config).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| format!("Falha ao configurar o servidor central Ren'Py: {error}"))?;
     session_log(
         app,
         "system",
@@ -1080,7 +1079,7 @@ fn run_game_session(app: AppHandle, game: Game, project: PathBuf) -> Result<i32,
     let server_port = if game.engine == "Unity" { 5001 } else { 5000 };
 
     if game.engine == "Unity" {
-        let launcher = project.join("uat-unity/dist/UAT-Unity/lt.exe");
+        let launcher = project.join("unity/lt.exe");
         if !launcher.is_file() {
             return Err(format!(
                 "Runtime Unity não encontrado em {}",
@@ -1109,6 +1108,7 @@ fn run_game_session(app: AppHandle, game: Game, project: PathBuf) -> Result<i32,
                 .arg(game.architecture.as_deref().unwrap_or("x64"))
                 .current_dir(launcher.parent().unwrap_or(&project))
                 .env("UAT_GAME_DIR", game_root)
+                .env("UAT_STATE_DIR", game_root.join("uat-unity"))
                 .env("UAT_MODELS_DIR", &universal_models)
                 .env("PYTHONIOENCODING", "utf-8");
             run_stage(install, &app, "Instalando BepInEx e XUnity dentro do jogo")?;
@@ -1129,6 +1129,7 @@ fn run_game_session(app: AppHandle, game: Game, project: PathBuf) -> Result<i32,
             .arg(game.intermediate_language.as_deref().unwrap_or(""))
             .current_dir(launcher.parent().unwrap_or(&project))
             .env("UAT_GAME_DIR", game_root)
+            .env("UAT_STATE_DIR", game_root.join("uat-unity"))
             .env("UAT_MODELS_DIR", &universal_models)
             .env("PYTHONIOENCODING", "utf-8");
         run_stage(config, &app, "Configurando XUnity e o fluxo universal")?;
@@ -1139,11 +1140,12 @@ fn run_game_session(app: AppHandle, game: Game, project: PathBuf) -> Result<i32,
             .arg("server")
             .current_dir(launcher.parent().unwrap_or(&project))
             .env("UAT_GAME_DIR", game_root)
+            .env("UAT_STATE_DIR", game_root.join("uat-unity"))
             .env("UAT_MODELS_DIR", &universal_models)
             .env("PYTHONIOENCODING", "utf-8");
         translation_server = spawn_streaming(server, &app, "servidor Unity")?;
     } else {
-        let engine_root = project.join("uat-renpy");
+        let engine_root = project.join("renpy");
         let launcher = engine_root.join("lt.exe");
         if !launcher.is_file() {
             return Err(format!(
@@ -1161,7 +1163,8 @@ fn run_game_session(app: AppHandle, game: Game, project: PathBuf) -> Result<i32,
         let mut server = Command::new(&launcher);
         server
             .arg("__server__")
-            .current_dir(&engine_root)
+            .current_dir(game_root.join("uat"))
+            .env("UAT_GAME_DIR", game_root)
             .env("UAT_MODELS_DIR", models_directory(&app)?)
             .env("PYTHONIOENCODING", "utf-8");
         translation_server = spawn_streaming(server, &app, "servidor Ren'Py")?;
@@ -1186,7 +1189,7 @@ fn run_game_session(app: AppHandle, game: Game, project: PathBuf) -> Result<i32,
     };
     session_log(&app, "system", format!("Abrindo o jogo: {}", game.name));
     let mut command = Command::new(&executable);
-    command.current_dir(game_root);
+    command.current_dir(game_root).env("SFTRANSLATOR_MANAGED_RUNTIME", "1");
     let mut child = spawn_streaming(command, &app, "jogo")?;
     let code = wait_for_game_exit(&mut child, session_marker.as_deref(), &app);
     session_log(
@@ -1216,7 +1219,7 @@ fn launch_game(app: AppHandle, game_id: String) -> Result<(), String> {
     game.last_launch = Some(chrono::Utc::now().to_rfc3339());
     let game = game.clone();
     save_games(&app, &games)?;
-    let project = project_root().ok_or("Pasta dos motores não encontrada.")?;
+    let project = runtime_directory(&app)?;
     session_log(
         &app,
         "system",
@@ -1246,20 +1249,34 @@ fn project_root() -> Option<PathBuf> {
         .chain(cwd.as_deref())
         .chain(Some(Path::new(env!("CARGO_MANIFEST_DIR"))))
         .find_map(|base| base.ancestors().find(|candidate| {
-            candidate.join("uat-renpy").is_dir() && candidate.join("uat-unity").is_dir()
+            candidate.join("engines/uat-renpy").is_dir() && candidate.join("engines/uat-unity").is_dir()
         }).map(Path::to_path_buf))
 }
 
 fn models_directory(app: &AppHandle) -> Result<PathBuf, String> {
-    if let Some(root) = project_root() {
-        return Ok(root.join("uat-renpy/models"));
+    let destination = app.path().app_data_dir().map_err(|e| e.to_string())?.join("models");
+    if !destination.exists() {
+        if let Some(root) = project_root() {
+            let legacy = root.join("engines/uat-renpy/models");
+            if legacy.is_dir() { copy_renpy_tree(&legacy, &destination)?; }
+        }
+        fs::create_dir_all(&destination).map_err(|e| e.to_string())?;
     }
-    Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join("models"))
+    Ok(destination)
+}
+
+fn runtime_directory(app: &AppHandle) -> Result<PathBuf, String> {
+    let mut candidates = vec![app.path().resource_dir().map_err(|e| e.to_string())?.join("runtimes")];
+    if cfg!(debug_assertions) {
+        candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/runtimes"));
+    }
+    candidates.into_iter().find(|root| root.join("unity/lt.exe").is_file() && root.join("renpy/lt.exe").is_file())
+        .ok_or_else(|| "Motores integrados ausentes. Reinstale o SFTranslator usando o instalador completo.".into())
 }
 
 #[tauri::command]
-fn engine_health() -> Vec<EngineHealth> {
-    let Some(root) = project_root() else {
+fn engine_health(app: AppHandle) -> Vec<EngineHealth> {
+    let Ok(root) = runtime_directory(&app) else {
         return vec![
             EngineHealth {
                 engine: "Ren'Py".into(),
@@ -1277,21 +1294,22 @@ fn engine_health() -> Vec<EngineHealth> {
             },
         ];
     };
-    let renpy = root.join("uat-renpy");
-    let unity = root.join("uat-unity");
+    let renpy = root.join("renpy");
+    let unity = root.join("unity");
+    let models_present = models_directory(&app).map(|path| !catalog::installed_packages(&path.join("argos-translate")).is_empty()).unwrap_or(false);
     vec![
         EngineHealth {
             engine: "Ren'Py".into(),
             source_found: renpy.join("uat/uat_hook.py").is_file(),
             runtime_found: renpy.join("lt.exe").is_file(),
-            model_found: renpy.join("models/argos-translate/packages").is_dir(),
+            model_found: models_present,
             details: "Hook moderno e legado; servidor local LibreTranslate/Argos.".into(),
         },
         EngineHealth {
             engine: "Unity".into(),
-            source_found: unity.join("uat_unity.py").is_file(),
-            runtime_found: unity.join("dist/UAT-Unity/lt.exe").is_file(),
-            model_found: renpy.join("models/argos-translate/packages").is_dir(),
+            source_found: unity.join("lt.exe").is_file(),
+            runtime_found: unity.join("lt.exe").is_file(),
+            model_found: models_present,
             details: "Instalador BepInEx/XUnity para Mono e IL2CPP usando a biblioteca universal."
                 .into(),
         },

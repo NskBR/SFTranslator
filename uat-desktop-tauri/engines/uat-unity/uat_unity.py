@@ -68,7 +68,7 @@ if FROZEN:
     SELF_DIR = os.path.dirname(os.path.abspath(sys.executable))
 else:
     SELF_DIR = os.path.dirname(os.path.abspath(__file__))
-UAT_DIR = SELF_DIR
+UAT_DIR = os.path.abspath(os.environ.get('UAT_STATE_DIR') or SELF_DIR)
 
 _LAUNCHER_EXES = {
     'lt.exe', 'uat-unity.exe', 'uat_unity.exe', 'python.exe', 'pythonw.exe',
@@ -201,7 +201,7 @@ os.environ['ARGOS_PACKAGES_DIR'] = PACKAGES_DIR
 os.environ.setdefault('ARGOS_DEVICE_TYPE', 'cpu')
 try:
     from minisbd import models as _msbd
-    _msbd.cache_dir = os.path.join(MODELS_DIR, 'minisbd')
+    _msbd.cache_dir = os.environ.get('UAT_SBD_DIR') or os.path.join(MODELS_DIR, 'minisbd')
 except Exception:
     pass
 import argostranslate.package as _apackage
@@ -367,9 +367,10 @@ def available_models(refresh=True):
     '''dict {(src,tgt): pkg} de pares diretos no catalogo Argos.'''
     out = {}
     try:
-        if refresh:
+        if refresh and not os.environ.get('SFTRANSLATOR_MANAGED_RUNTIME'):
             _apackage.update_package_index()
-        for pkg in _apackage.get_available_packages():
+        packages = (_apackage.get_installed_packages() if os.environ.get('SFTRANSLATOR_MANAGED_RUNTIME') else _apackage.get_available_packages())
+        for pkg in packages:
             s = _argos_code(getattr(pkg, 'from_code', ''))
             t = _argos_code(getattr(pkg, 'to_code', ''))
             if s and t and s != t:
@@ -459,6 +460,8 @@ _translate_lock = threading.Lock()
 def _ensure_pair_loaded(src, tgt):
     src, tgt = _argos_code(src), _argos_code(tgt)
     if (src, tgt) not in installed_models():
+        if os.environ.get('SFTRANSLATOR_MANAGED_RUNTIME'):
+            return False
         install_pair(src, tgt)
         _refresh_argos()
     return (src, tgt) in installed_models()
@@ -1698,7 +1701,8 @@ def main():
         target = args[2] if len(args) > 2 else None
         flow_mode = args[3] if len(args) > 3 else 'direct'
         intermediate = args[4] if len(args) > 4 else None
-        configure_languages(source, target, flow_mode, intermediate)
+        if not configure_languages(source, target, flow_mode, intermediate):
+            raise SystemExit(1)
         return
     if command in ('models', 'modelos'):
         show_installed_models()

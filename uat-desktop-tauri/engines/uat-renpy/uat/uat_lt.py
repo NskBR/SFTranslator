@@ -324,6 +324,12 @@ def _mark_ready(reason):
 def ensure_server():
     """Chamado pelo hook em thread separada (nunca bloqueia o jogo)."""
     global _started
+    if os.environ.get("SFTRANSLATOR_MANAGED_RUNTIME") == "1":
+        if _server_up():
+            _warmup()
+        else:
+            _log("Servidor gerenciado pelo SFTranslator indisponivel. Reabra a sessao no aplicativo.")
+        return
     with _lock:
         if _started:
             return

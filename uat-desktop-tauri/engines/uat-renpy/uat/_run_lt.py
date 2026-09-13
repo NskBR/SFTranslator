@@ -26,6 +26,9 @@ def _exe_dir():
 def _find_uat_dir():
     """Acha a pasta uat/ (a que tem uat_config.json) subindo a arvore.
     Funciona com lt/ em qualquer lugar: raiz do jogo, subpasta, etc."""
+    override = os.environ.get('UAT_GAME_DIR')
+    if override:
+        return os.path.join(os.path.abspath(override), 'uat')
     base = _exe_dir()
     # modo script: _run_lt.py mora dentro de uat/
     if not FROZEN and os.path.isfile(os.path.join(base, "uat_config.json")):
@@ -100,7 +103,7 @@ if MODELS:
     os.environ["ARGOS_PACKAGES_DIR"] = os.path.join(MODELS, "argos-translate", "packages")
     try:
         from minisbd import models as _msbd
-        _msbd.cache_dir = os.path.join(MODELS, "minisbd")
+        _msbd.cache_dir = os.environ.get('UAT_SBD_DIR') or os.path.join(MODELS, "minisbd")
     except Exception:
         pass
 
@@ -694,6 +697,11 @@ def _server_ready(timeout=1.5):
 
 def _run_server():
     """Sobe o servidor LibreTranslate (bloqueia)."""
+    if os.environ.get('SFTRANSLATOR_MANAGED_RUNTIME'):
+        # The desktop installs explicit pairs. LibreTranslate's default boot
+        # downloads additional models when fewer than two packages are present.
+        import libretranslate.init
+        libretranslate.init.boot = lambda *args, **kwargs: None
     from libretranslate import main
     sys.argv = [
         "libretranslate", "--host", "127.0.0.1",

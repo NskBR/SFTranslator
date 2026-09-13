@@ -5,6 +5,7 @@ $releaseDirectory = Join-Path $projectRoot "release"
 
 Push-Location $projectRoot
 try {
+    & (Join-Path $PSScriptRoot "prepare-runtimes.ps1")
     & npm.cmd run tauri -- build
     if ($LASTEXITCODE -ne 0) {
         throw "A geração do pacote Tauri falhou (código $LASTEXITCODE)."
