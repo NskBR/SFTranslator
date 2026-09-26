@@ -231,6 +231,50 @@ class SafetyTests(unittest.TestCase):
              patch.object(uat, '_translate_pair', side_effect=[(True, 'Hello'), (False, 'Hello')]):
             self.assertEqual(uat.translate_text('こんにちは', 'auto', 'pb'), 'こんにちは')
 
+    def test_translation_normalizes_combining_accents(self):
+        config = {'flow_mode': 'direct'}
+        with patch.object(uat, 'load_config', return_value=config), \
+             patch.object(uat, '_translate_pair', return_value=(True, 'ac\u0327a\u0303o')) as translate:
+            self.assertEqual(uat.translate_text('Cafe\u0301', 'en', 'pb'), 'ação')
+        self.assertEqual(translate.call_args.args[0], 'Café')
+
+    def test_emoji_survives_direct_translation(self):
+        config = {'flow_mode': 'direct'}
+        with patch.object(uat, 'load_config', return_value=config), \
+             patch.object(uat, '_translate_pair', return_value=(True, 'Olá UATEMOJI0!')):
+            self.assertEqual(uat.translate_text('Hello 👋!', 'en', 'pb'), 'Olá 👋!')
+
+    def test_emoji_survives_when_model_drops_placeholder(self):
+        config = {'flow_mode': 'direct'}
+        def model(text, source, target):
+            return True, 'Olá!' if 'UATEMOJI' in text else text.replace('Hello', 'Olá')
+        with patch.object(uat, 'load_config', return_value=config), \
+             patch.object(uat, '_translate_pair', side_effect=model):
+            result = uat.translate_text('Hello 👩‍👩‍👧‍👦!', 'en', 'pb')
+        self.assertIn('👩‍👩‍👧‍👦', result)
+        self.assertIn('Olá', result)
+
+    def test_emoji_fallback_keeps_spacing(self):
+        def model(text):
+            if 'UATEMOJI' in text:
+                return True, 'Olá amigo!'
+            return True, {'Hello': 'Olá', 'friend!': 'amigo!'}.get(text, text)
+        self.assertEqual(
+            uat._translate_preserving_emoji('Hello 👋 friend!', model),
+            (True, 'Olá 👋 amigo!'))
+
+    def test_emoji_only_skips_model(self):
+        with patch.object(uat, 'load_config', return_value={'flow_mode': 'direct'}), \
+             patch.object(uat, '_translate_pair') as translate:
+            self.assertEqual(uat.translate_text('👋', 'en', 'pb'), '👋')
+        translate.assert_not_called()
+
+    def test_emoji_marker_does_not_replace_literal_game_text(self):
+        config = {'flow_mode': 'direct'}
+        with patch.object(uat, 'load_config', return_value=config), \
+             patch.object(uat, '_translate_pair', side_effect=lambda text, *_: (True, text)):
+            self.assertEqual(uat.translate_text('UATEMOJI0 👋', 'en', 'pb'), 'UATEMOJI0 👋')
+
 
 @unittest.skipUnless(os.environ.get('UAT_LIVE_TEST') == '1',
                      'defina UAT_LIVE_TEST=1 para testar os ZIPs oficiais')

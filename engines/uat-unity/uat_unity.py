@@ -51,6 +51,8 @@ import urllib.parse
 import urllib.error
 import http.server
 import re as _re
+import regex as _regex
+import unicodedata
 
 # Jogos japoneses/chineses frequentemente vivem em caminhos que nao cabem na
 # pagina de codigo legada do CMD. Nunca deixe um print derrubar o launcher.
@@ -456,6 +458,72 @@ def cache_path():
 # TRADUCAO (backend Argos direto)
 # =========================================================================
 _translate_lock = threading.Lock()
+_language_mismatch_warnings = set()
+_emoji_grapheme = _regex.compile(r'\X')
+_emoji_codepoint = _regex.compile(r'[\p{Extended_Pictographic}\p{Regional_Indicator}\u20e3]')
+
+
+def _translate_preserving_emoji(text, translate):
+    """Keep complete emoji graphemes outside Argos, including ZWJ sequences."""
+    if not _emoji_codepoint.search(text):
+        return translate(text)
+    graphemes = _emoji_grapheme.findall(text)
+    emoji = [part for part in graphemes if _emoji_codepoint.search(part)]
+    if len(emoji) == len(graphemes):
+        return True, text
+
+    marker_prefix = 'UATEMOJI'
+    while marker_prefix in text:
+        marker_prefix += 'X'
+    markers = [f'{marker_prefix}{index}' for index in range(len(emoji))]
+    parts = []
+    index = 0
+    for part in graphemes:
+        if _emoji_codepoint.search(part):
+            parts.append(markers[index])
+            index += 1
+        else:
+            parts.append(part)
+    ok, translated = translate(''.join(parts))
+    if not ok:
+        return False, text
+    if all(translated.count(marker) == 1 for marker in markers):
+        for marker, original in zip(markers, emoji):
+            translated = translated.replace(marker, original)
+        return True, translated
+
+    # Some models drop placeholders. Translate the text spans separately so
+    # the original emoji and their order cannot be lost in that case.
+    result = []
+    span = []
+    for part in graphemes + ['']:
+        if part and not _emoji_codepoint.search(part):
+            span.append(part)
+            continue
+        if span:
+            original = ''.join(span)
+            if original.strip():
+                leading = len(original) - len(original.lstrip())
+                trailing = len(original) - len(original.rstrip())
+                core = original[leading:len(original) - trailing if trailing else None]
+                span_ok, rendered = translate(core)
+                if not span_ok:
+                    return False, text
+                result.append(original[:leading] + rendered +
+                              (original[-trailing:] if trailing else ''))
+            else:
+                result.append(original)
+            span.clear()
+        if part:
+            result.append(part)
+    return True, ''.join(result)
+
+def _source_script_mismatch(text, source):
+    """Não envie texto CJK a um modelo configurado como inglês."""
+    if source != 'en':
+        return False
+    return any('\u3400' <= char <= '\u9fff' or '\u3040' <= char <= '\u30ff'
+               or '\uac00' <= char <= '\ud7af' for char in text)
 
 def _ensure_pair_loaded(src, tgt):
     src, tgt = _argos_code(src), _argos_code(tgt)
@@ -483,20 +551,29 @@ def translate_text(text, from_code, to_code):
     '''Traduz diretamente ou em cadeia, sempre no mesmo processo Argos.'''
     if not text:
         return ''
+    text = unicodedata.normalize('NFC', text)
     cfg = load_config()
     source = _argos_code(cfg.get('source_language', 'en') if from_code in ('auto', '', None) else from_code)
     target = _argos_code(to_code)
     try:
         with _translate_lock:
-            if cfg.get('flow_mode') == 'chain':
-                middle = _argos_code(cfg.get('intermediate_language', 'en'))
-                first_ok, intermediate = _translate_pair(text, source, middle)
-                if not first_ok:
-                    return text
-                second_ok, translated = _translate_pair(intermediate, middle, target)
-                return translated if second_ok else text
-            ok, translated = _translate_pair(text, source, target)
-            return translated if ok else text
+            if _source_script_mismatch(text, source):
+                key = text[:80]
+                if key not in _language_mismatch_warnings and len(_language_mismatch_warnings) < 10:
+                    _language_mismatch_warnings.add(key)
+                    _log('[translate] texto CJK recebido no fluxo EN -> {}. Corrija o idioma original no editor; texto preservado.'.format(target))
+                return text
+            def translate_span(span):
+                if cfg.get('flow_mode') == 'chain':
+                    middle = _argos_code(cfg.get('intermediate_language', 'en'))
+                    first_ok, intermediate = _translate_pair(span, source, middle)
+                    if not first_ok:
+                        return False, span
+                    return _translate_pair(intermediate, middle, target)
+                return _translate_pair(span, source, target)
+
+            ok, translated = _translate_preserving_emoji(text, translate_span)
+            return unicodedata.normalize('NFC', translated) if ok else text
     except Exception as error:
         _log('[translate] erro: {}'.format(error))
         return text
@@ -528,11 +605,17 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header('Content-Type', ctype)
         self.send_header('Content-Length', str(len(data)))
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
         try:
             self.wfile.write(data)
         except Exception:
             pass
+
+    def do_OPTIONS(self):
+        self._send(204, b'')
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -592,6 +675,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 class _Srv(http.server.ThreadingHTTPServer):
     allow_reuse_address = True
     daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        # NW.js fecha conexões ao trocar de cena ou encerrar o jogo. Isso não é
+        # falha do motor de tradução e não precisa de traceback no console.
+        if isinstance(sys.exc_info()[1], (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)):
+            return
+        super().handle_error(request, client_address)
 
 _server = None
 _server_lock = threading.Lock()

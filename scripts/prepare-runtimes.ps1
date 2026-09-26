@@ -9,3 +9,5 @@ if (-not (Test-Path $python)) {
 if ($LASTEXITCODE -ne 0) { throw "Falha ao preparar dependências de build." }
 & $python (Join-Path $PSScriptRoot "build-runtimes.py")
 if ($LASTEXITCODE -ne 0) { throw "Falha ao empacotar os motores integrados." }
+& $python (Join-Path $PSScriptRoot "stage-unreal-observer.py")
+if ($LASTEXITCODE -ne 0) { throw "Falha ao empacotar o observador Unreal." }

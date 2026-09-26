@@ -1,4 +1,4 @@
-export type Engine = "Unity" | "Ren'Py" | "Desconhecido";
+export type Engine = string;
 
 export interface Game {
   id: string;
@@ -7,7 +7,7 @@ export interface Game {
   engine: Engine;
   runtime?: string;
   architecture?: string;
-  status: "Novo" | "Pronto" | "Atenção" | "Instalação pendente" | "Modelo necessário";
+  status: "Novo" | "Pronto" | "Atenção" | "Instalação pendente" | "Modelo necessário" | "Em desenvolvimento";
   sourceLanguage: string;
   targetLanguage: string;
   addedAt: string;
@@ -30,6 +30,7 @@ export interface EngineHealth {
   sourceFound: boolean;
   runtimeFound: boolean;
   modelFound: boolean;
+  development?: boolean;
   details: string;
 }
 
@@ -43,3 +44,6 @@ export interface TranslationModel {
   installed: boolean;
   usedBy: number;
 }
+
+export type DownloadTask = {id:string; modelId:string; name:string; status:"baixando"|"concluído"|"erro"; detail:string; progress:number};
+export type SessionLine = {kind:string; text:string};

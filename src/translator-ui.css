@@ -79,9 +79,12 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .dot.ok { background: var(--ready); box-shadow: 0 0 7px rgba(16, 185, 129, .38); }
 .dot.warn { background: var(--ember); box-shadow: none; }
 
-.app-title { display: flex; align-items: center; justify-content: center; gap: 6px; pointer-events: none; }
+.app-title { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.app-title strong, .app-title > span { pointer-events: none; }
 .app-title strong { color: var(--text); font-size: var(--font-body); font-weight: 700; letter-spacing: -.01em; }
 .app-title span { padding: 2px 6px; border-radius: 4px; color: var(--ember); background: var(--ember-soft); font-size: var(--font-label); font-weight: 700; }
+.titlebar-update { margin-left: 5px; padding: 3px 8px; border: 1px solid rgba(245, 158, 11, .4); border-radius: 6px; background: var(--ember-soft); color: var(--ember); font-size: var(--font-label); font-weight: 700; white-space: nowrap; }
+.titlebar-update:hover { background: rgba(245, 158, 11, .24); }
 .window-actions { height: 40px; display: flex; justify-content: flex-end; }
 .window-actions button { width: 42px; height: 40px; display: grid; place-items: center; color: var(--text-2); transition: .15s; }
 .window-actions button:hover { color: var(--text); background: var(--surface); }
@@ -470,7 +473,7 @@ main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: colu
 .game-config-page { display: flex; flex-direction: column; overflow: hidden; }
 .game-config-header { height: 34px; flex: 0 0 34px; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .game-config-header .back-button { margin: 0; }
-.game-config-header > span { color: var(--muted); font-size: var(--font-label); }
+.game-config-header > span { min-width: 0; overflow: hidden; color: var(--muted); font-size: var(--font-label); text-overflow: ellipsis; white-space: nowrap; }
 .game-config-identity { flex: 0 0 76px; display: flex; align-items: center; gap: 16px; margin-bottom: 9px; }
 .game-config-identity .details-icon { width: 62px; height: 62px; }
 .game-identity-primary { min-width: 220px; flex: 1 1 260px; display: flex; align-items: center; gap: 13px; }
@@ -558,6 +561,11 @@ main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: colu
 .diag-coming { color: var(--muted); }
 .diag-coming > .pill { align-self: flex-start; margin-top: 2px; }
 .diag-coming > p { margin: 10px 0 0; font-size: var(--font-small); line-height: 1.45; }
+.diag-development { border: 1px solid rgba(245, 158, 11, .32); }
+.diag-development > .pill { align-self: flex-start; margin: 0; color: var(--ember); background: var(--ember-soft); }
+.diag-development .development-explanation { margin: 10px 0 12px; color: var(--text-2); font-size: var(--font-small); line-height: 1.5; }
+.diag-development > .secondary { align-self: flex-start; }
+.engine-development-note { margin: 8px 0 12px; padding: 10px 12px; border: 1px solid rgba(245, 158, 11, .25); border-radius: 8px; background: var(--ember-soft); color: var(--text-2); font-size: var(--font-small); line-height: 1.5; }
 .settings-card { border-radius: var(--radius); background: var(--surface); }
 .settings-card > div { position: relative; min-height: 64px; padding: 14px 16px; }
 .settings-card h3 { margin: 0 0 4px; font-size: var(--font-body); }
@@ -567,6 +575,24 @@ main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: colu
 .switch i { display: block; width: 15px; height: 15px; border-radius: 50%; background: var(--muted); }
 .switch.on { background: var(--ember-soft); }
 .switch.on i { margin-left: 17px; background: var(--ember); }
+.settings-card > .update-settings-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid var(--line); }
+.update-settings-row > div { min-width: 0; }
+.settings-card .update-settings-row .secondary { position: static; display: inline-flex; align-items: center; justify-content: center; gap: 7px; flex: 0 0 auto; }
+.update-settings-row .spin { animation: update-spin 1s linear infinite; }
+@keyframes update-spin { to { transform: rotate(360deg); } }
+.update-modal { position: relative; width: min(540px, 94vw); max-height: min(80vh, 700px); display: flex; flex-direction: column; padding: 24px; border: 1px solid rgba(245, 158, 11, .24); border-radius: 14px; background: var(--panel); box-shadow: 0 24px 70px #000; }
+.update-modal h2 { margin: 5px 35px 8px 0; font-size: 20px; }
+.update-summary { margin: 0; color: var(--text-2); font-size: var(--font-small); line-height: 1.5; }
+.update-notes { margin-top: 18px; min-height: 0; overflow-y: auto; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+.update-notes b { font-size: var(--font-small); }
+.update-notes p { margin: 7px 0 0; color: var(--text-2); font-size: var(--font-small); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.update-download { margin-top: 18px; }
+.update-download > div:first-child { display: flex; justify-content: space-between; gap: 12px; color: var(--text-2); font-size: var(--font-small); }
+.update-download small { display: block; margin-top: 6px; color: var(--muted); }
+.update-note { margin: 16px 0 0; padding: 10px 12px; border-radius: 8px; background: rgba(16, 185, 129, .1); color: var(--text-2); font-size: var(--font-small); }
+.update-note.warning { background: var(--ember-soft); color: var(--ember); }
+.update-modal footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+.update-modal footer button { display: inline-flex; align-items: center; gap: 7px; }
 
 /* Downloads e sessão CLI. */
 .downloads-list { display: flex; flex-direction: column; gap: 8px; }

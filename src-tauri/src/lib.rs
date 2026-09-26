@@ -1,20 +1,16 @@
 mod catalog;
+mod engines;
+mod models;
+mod session;
+mod updater;
+use models::models_directory;
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::{self, OpenOptions},
-    io::{BufRead, BufReader, Read, Seek, SeekFrom},
-    net::{SocketAddr, TcpStream},
+    fs,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
-    time::{Duration, Instant},
+    process::Command,
 };
-use tauri::{AppHandle, Emitter, Manager};
-
-static ACTIVE_GAME_PID: Mutex<Option<u32>> = Mutex::new(None);
+use tauri::{AppHandle, Manager};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -68,6 +64,7 @@ struct EngineHealth {
     source_found: bool,
     runtime_found: bool,
     model_found: bool,
+    development: bool,
     details: String,
 }
 
@@ -185,36 +182,12 @@ fn game_root(game: &Game) -> Result<PathBuf, String> {
 }
 
 fn game_cache_directory(game: &Game) -> Result<PathBuf, String> {
-    let root = game_root(game)?;
-    if game.engine == "Unity" {
-        let cache = if game.flow_mode == "chain" {
-            root.join("BepInEx/Translation/SFTranslator").join(renpy_cache_pair(game))
-        } else {
-            root.join("BepInEx/Translation").join(&game.target_language)
-        };
-        Ok(cache.join("Text"))
-    } else {
-        Ok(root.join("uat/caches"))
-    }
+    engines::by_name(&game.engine)?.cache_directory(game)
 }
 
 #[cfg(not(windows))]
 fn native_game_path(path: &Path) -> PathBuf {
     path.to_path_buf()
-}
-
-fn contains_files(dir: &Path, extensions: &[&str]) -> bool {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return false;
-    };
-    entries.flatten().any(|entry| {
-        let path = entry.path();
-        path.is_file()
-            && path
-                .extension()
-                .and_then(|e| e.to_str())
-                .is_some_and(|e| extensions.iter().any(|x| e.eq_ignore_ascii_case(x)))
-    })
 }
 
 fn pe_architecture(path: &Path) -> Option<String> {
@@ -234,58 +207,30 @@ fn pe_architecture(path: &Path) -> Option<String> {
 }
 
 fn inspect_game(executable: &Path) -> Result<(String, Option<String>, Option<String>), String> {
-    if !executable.is_file() {
-        return Err("O executável selecionado não existe.".into());
-    }
-    let root = executable.parent().ok_or("Pasta do jogo inválida.")?;
-    let stem = executable
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .ok_or("Nome de arquivo inválido.")?;
-    let unity_data = root.join(format!("{stem}_Data"));
-    let any_unity_data = fs::read_dir(root)
-        .ok()
-        .into_iter()
-        .flatten()
-        .flatten()
-        .any(|e| e.path().is_dir() && e.file_name().to_string_lossy().ends_with("_Data"));
-    if unity_data.is_dir()
-        || root.join("UnityPlayer.dll").is_file()
-        || (root.join("GameAssembly.dll").is_file() && any_unity_data)
-    {
-        let runtime = if root.join("GameAssembly.dll").is_file()
-            || unity_data
-                .join("il2cpp_data/Metadata/global-metadata.dat")
-                .is_file()
-        {
-            "IL2CPP"
-        } else if unity_data.join("Managed/Assembly-CSharp.dll").is_file()
-            || root.join("MonoBleedingEdge").is_dir()
-        {
-            "Mono"
-        } else {
-            "Desconhecido"
-        };
-        return Ok((
-            "Unity".into(),
-            Some(runtime.into()),
-            pe_architecture(executable),
-        ));
-    }
-    let game_dir = root.join("game");
-    if root.join("renpy").is_dir()
-        || (game_dir.is_dir() && contains_files(&game_dir, &["rpy", "rpyc", "rpa"]))
-    {
-        return Ok((
-            "Ren'Py".into(),
-            Some("Ren'Py".into()),
-            pe_architecture(executable),
-        ));
-    }
-    Err("Não foi possível reconhecer este jogo como Unity ou Ren'Py.".into())
+    engines::inspect(executable)
 }
 
 fn inspect_language(executable: &Path, engine: &str) -> (String, f64) {
+    if engine == "RPG Maker" {
+        let root = executable.parent().unwrap_or(Path::new("."));
+        let web = if root.join("www/data/System.json").is_file() { root.join("www") } else { root.to_path_buf() };
+        if let Ok(bytes) = fs::read(web.join("data/System.json")) {
+            if let Ok(system) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                if let Some(locale) = system["locale"].as_str() {
+                    let language = locale.split(['_', '-']).next().unwrap_or("").to_ascii_lowercase();
+                    let code = match language.as_str() {
+                        "zh" => Some("zh"), "ja" => Some("ja"), "ko" => Some("ko"),
+                        "en" => Some("en"), "pt" if locale.to_ascii_lowercase().contains("br") => Some("pb"),
+                        "pt" => Some("pt"), "es" => Some("es"),
+                        "fr" => Some("fr"), "de" => Some("de"), "ru" => Some("ru"),
+                        _ => None,
+                    };
+                    if let Some(code) = code { return (code.into(), 0.98) }
+                }
+            }
+        }
+        return ("en".into(), 0.0);
+    }
     let root = executable.parent().unwrap_or(Path::new("."));
     let candidates = [root.join("settings.json"), root.join("config.json")];
     for path in candidates {
@@ -311,55 +256,10 @@ fn inspect_language(executable: &Path, engine: &str) -> (String, f64) {
     }
 }
 
-fn directory_contains(root: &Path, needle: &str) -> bool {
-    let Ok(entries) = fs::read_dir(root) else {
-        return false;
-    };
-    entries.flatten().any(|entry| {
-        let path = entry.path();
-        if path.is_dir() {
-            directory_contains(&path, needle)
-        } else {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.to_ascii_lowercase().contains(needle))
-        }
-    })
-}
-
 fn integration_state(game: &Game) -> (bool, String) {
-    let executable = native_game_path(Path::new(&game.executable_path));
-    let root = executable.parent().unwrap_or(Path::new("."));
-    if game.engine == "Unity" {
-        let bep_in_ex = root.join("BepInEx");
-        let core_ready = bep_in_ex.join("core").is_dir();
-        let xunity_ready = directory_contains(&bep_in_ex.join("plugins"), "autotranslator");
-        if core_ready && xunity_ready {
-            (
-                true,
-                format!(
-                    "BepInEx/XUnity {} instalado no jogo",
-                    game.runtime.as_deref().unwrap_or("")
-                ),
-            )
-        } else {
-            (
-                false,
-                format!(
-                    "BepInEx/XUnity {} será instalado ao iniciar",
-                    game.runtime.as_deref().unwrap_or("")
-                ),
-            )
-        }
-    } else {
-        let ready =
-            root.join("game/uat_hook.rpy").is_file() && root.join("uat/uat_hook.py").is_file();
-        if ready {
-            (true, "Hook Ren'Py instalado na pasta do jogo".into())
-        } else {
-            (false, "Hook compatível será instalado ao iniciar".into())
-        }
-    }
+    engines::by_name(&game.engine)
+        .map(|adapter| adapter.integration_state(game))
+        .unwrap_or((false, "Motor não suportado".into()))
 }
 
 #[tauri::command]
@@ -368,6 +268,16 @@ fn list_games(app: AppHandle) -> Result<Vec<Game>, String> {
     let installed = catalog::installed_packages(&models_directory(&app)?.join("argos-translate"));
     let mut changed = false;
     for game in &mut games {
+        if game.engine == "RPG Maker" {
+            let (detected, confidence) = inspect_language(Path::new(&game.executable_path), &game.engine);
+            if confidence > game.language_confidence.unwrap_or(0.0)
+                && (game.detected_language.as_deref() != Some(&detected)
+                    || game.language_confidence != Some(confidence)) {
+                game.detected_language = Some(detected);
+                game.language_confidence = Some(confidence);
+                changed = true;
+            }
+        }
         let model_installed = required_model_ids(game).iter().all(|id| installed.contains_key(id));
         if game.model_installed != model_installed {
             game.model_installed = model_installed;
@@ -388,7 +298,9 @@ fn list_games(app: AppHandle) -> Result<Vec<Game>, String> {
             game.integration_status = Some(integration_status);
             changed = true;
         }
-        let status = if game.model_installed && integration_ready {
+        let status = if engines::by_name(&game.engine).is_ok_and(|adapter| !adapter.translation_available(game)) {
+            "Em desenvolvimento"
+        } else if game.model_installed && integration_ready {
             "Pronto"
         } else if game.model_installed {
             "Instalação pendente"
@@ -407,13 +319,22 @@ fn list_games(app: AppHandle) -> Result<Vec<Game>, String> {
 }
 
 #[tauri::command]
-fn add_game(app: AppHandle, executable_path: String) -> Result<Game, String> {
+fn add_game(app: AppHandle, executable_path: String, engine_hint: Option<String>) -> Result<Game, String> {
     let executable = PathBuf::from(&executable_path);
     let canonical = executable
         .canonicalize()
         .map_err(|_| "O executável selecionado não existe.".to_string())?;
     let canonical = native_game_path(&canonical);
-    let (engine, runtime, architecture) = inspect_game(&canonical)?;
+    let (engine, runtime, architecture) = if engine_hint.as_deref() == Some("RPG Maker") {
+        let detected = engines::by_name("RPG Maker")?.inspect(&canonical);
+        ("RPG Maker".into(), detected.as_ref().and_then(|found| found.runtime.clone()).or(Some("Não identificado (teste)".into())), detected.and_then(|found| found.architecture).or_else(|| pe_architecture(&canonical)))
+    } else if engine_hint.as_deref() == Some("Unreal") {
+        let detected = engines::by_name("Unreal")?.inspect(&canonical)
+            .ok_or("Não encontrei Content/Paks com arquivos .pak ou .utoc para confirmar que este executável é Unreal.")?;
+        ("Unreal".into(), detected.runtime, detected.architecture)
+    } else {
+        inspect_game(&canonical)?
+    };
     let (detected_language, language_confidence) = inspect_language(&canonical, &engine);
     let mut games = load_games(&app)?;
     if games
@@ -448,6 +369,17 @@ fn add_game(app: AppHandle, executable_path: String) -> Result<Game, String> {
     };
     let (_, integration_status) = integration_state(&game);
     let mut game = game;
+    if engines::by_name(&game.engine).is_ok_and(|adapter| !adapter.translation_available(&game)) {
+        game.status = "Em desenvolvimento".into();
+    }
+    if game.engine == "RPG Maker" {
+        if matches!(game.runtime.as_deref(), Some("MV" | "MZ" | "Unite Mono" | "Unite IL2CPP")) {
+            game.status = "Modelo necessário".into();
+        }
+        if matches!(game.name.as_str(), "Game" | "RPG_RT") {
+            if let Some(folder) = canonical.parent().and_then(|path| path.file_name()).and_then(|name| name.to_str()) { game.name = folder.to_string(); }
+        }
+    }
     game.integration_status = Some(integration_status);
     games.push(game.clone());
     save_games(&app, &games)?;
@@ -516,7 +448,9 @@ fn configure_game(
     game.model_installed = required_model_ids(game).iter().all(|id| installed.contains_key(id));
     let (integration_ready, integration_status) = integration_state(game);
     game.integration_status = Some(integration_status);
-    game.status = if game.model_installed && integration_ready {
+    game.status = if engines::by_name(&game.engine).is_ok_and(|adapter| !adapter.translation_available(game)) {
+        "Em desenvolvimento".into()
+    } else if game.model_installed && integration_ready {
         "Pronto".into()
     } else if game.model_installed {
         "Instalação pendente".into()
@@ -582,714 +516,7 @@ fn clear_game_cache(app: AppHandle, game_id: String) -> Result<(), String> {
         .into_iter()
         .find(|game| game.id == game_id)
         .ok_or("Jogo não encontrado.")?;
-    let directory = game_cache_directory(&game)?;
-    if game.engine == "Unity" {
-        if directory.is_dir() {
-            fs::remove_dir_all(&directory).map_err(|error| error.to_string())?;
-        }
-        return Ok(());
-    }
-
-    let pair = renpy_cache_pair(&game);
-    for file in [
-        directory.join(format!("uat_cache_{pair}.json")),
-        directory.join(format!("uat_words_{pair}.json")),
-    ] {
-        if file.is_file() {
-            fs::remove_file(file).map_err(|error| error.to_string())?;
-        }
-    }
-    Ok(())
-}
-
-#[tauri::command]
-fn delete_model(app: AppHandle, model_id: String) -> Result<(), String> {
-    let packages = models_directory(&app)?.join("argos-translate/packages");
-    let entries = fs::read_dir(&packages).map_err(|e| e.to_string())?;
-    let mut removed = false;
-    for entry in entries.flatten() {
-        let metadata = entry.path().join("metadata.json");
-        let Ok(bytes) = fs::read(metadata) else {
-            continue;
-        };
-        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-            continue;
-        };
-        let id = format!(
-            "{}-{}",
-            value["from_code"].as_str().unwrap_or(""),
-            value["to_code"].as_str().unwrap_or("")
-        );
-        if id == model_id {
-            fs::remove_dir_all(entry.path())
-                .map_err(|e| format!("Não foi possível apagar o modelo: {e}"))?;
-            removed = true;
-        }
-    }
-    if !removed {
-        return Err("Modelo não encontrado.".into());
-    }
-    let mut games = load_games(&app)?;
-    let installed = catalog::installed_packages(&models_directory(&app)?.join("argos-translate"));
-    for game in &mut games {
-        if required_model_ids(game).iter().any(|id| id == &model_id) {
-            game.model_installed = required_model_ids(game).iter().all(|id| installed.contains_key(id));
-            if !game.model_installed { game.status = "Modelo necessário".into(); }
-        }
-    }
-    save_games(&app, &games)
-}
-
-#[tauri::command]
-fn download_model(app: AppHandle, model_id: String) -> Result<(), String> {
-    let models_root = models_directory(&app)?.join("argos-translate");
-    let catalog = catalog::load_catalog(&models_root);
-    let package = catalog
-        .iter()
-        .find(|value| {
-            format!(
-                "{}-{}",
-                value["from_code"].as_str().unwrap_or(""),
-                value["to_code"].as_str().unwrap_or("")
-            ) == model_id
-        })
-        .ok_or("Fluxo não encontrado no catálogo Argos.")?;
-    let url = package["links"]
-        .as_array()
-        .and_then(|links| {
-            links
-                .iter()
-                .filter_map(|link| link.as_str())
-                .find(|link| link.starts_with("https://"))
-        })
-        .ok_or("Este pacote não possui uma fonte HTTPS compatível.")?;
-    let mut response =
-        reqwest::blocking::get(url).map_err(|e| format!("Falha no download: {e}"))?;
-    if !response.status().is_success() {
-        return Err(format!(
-            "Servidor Argos respondeu com {}.",
-            response.status()
-        ));
-    }
-    let total = response.content_length().unwrap_or(0);
-    let mut bytes = Vec::new();
-    let mut buffer = [0u8; 64 * 1024];
-    loop {
-        let count = response
-            .read(&mut buffer)
-            .map_err(|e| format!("Download incompleto: {e}"))?;
-        if count == 0 {
-            break;
-        }
-        bytes.extend_from_slice(&buffer[..count]);
-        let progress = if total > 0 {
-            ((bytes.len() as u64 * 100) / total).min(99)
-        } else {
-            0
-        };
-        app.emit(
-            "model-download-progress",
-            serde_json::json!({"modelId": model_id, "progress": progress}),
-        )
-        .ok();
-    }
-    let packages = models_root.join("packages");
-    fs::create_dir_all(&packages).map_err(|e| e.to_string())?;
-    let staging = packages.join(format!(".download-{model_id}"));
-    if staging.exists() {
-        fs::remove_dir_all(&staging).map_err(|e| e.to_string())?;
-    }
-    fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
-    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
-        .map_err(|e| format!("Pacote Argos inválido: {e}"))?;
-    for index in 0..archive.len() {
-        let mut file = archive.by_index(index).map_err(|e| e.to_string())?;
-        let Some(relative) = file.enclosed_name() else {
-            continue;
-        };
-        let output = staging.join(relative);
-        if file.is_dir() {
-            fs::create_dir_all(&output).map_err(|e| e.to_string())?;
-        } else {
-            if let Some(parent) = output.parent() {
-                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-            let mut target = fs::File::create(output).map_err(|e| e.to_string())?;
-            std::io::copy(&mut file, &mut target).map_err(|e| e.to_string())?;
-        }
-    }
-    fn find_package_root(directory: &Path) -> Option<PathBuf> {
-        if directory.join("metadata.json").is_file() {
-            return Some(directory.to_path_buf());
-        }
-        fs::read_dir(directory).ok()?.flatten().find_map(|entry| {
-            let path = entry.path();
-            if path.is_dir() {
-                find_package_root(&path)
-            } else {
-                None
-            }
-        })
-    }
-    let Some(package_root) = find_package_root(&staging) else {
-        fs::remove_dir_all(&staging).ok();
-        return Err("O pacote baixado não contém metadata.json.".into());
-    };
-    let version = package["package_version"]
-        .as_str()
-        .unwrap_or("unknown")
-        .replace('.', "_");
-    let destination = packages.join(format!(
-        "translate-{}-{}",
-        model_id.replace('-', "_"),
-        version
-    ));
-    if destination.exists() {
-        fs::remove_dir_all(&staging).ok();
-        return Ok(());
-    }
-    if package_root == staging {
-        fs::rename(&staging, destination)
-            .map_err(|e| format!("Falha ao instalar o modelo: {e}"))?;
-    } else {
-        fs::rename(&package_root, &destination)
-            .map_err(|e| format!("Falha ao instalar o modelo: {e}"))?;
-        fs::remove_dir_all(&staging).ok();
-    }
-    app.emit(
-        "model-download-progress",
-        serde_json::json!({"modelId": model_id, "progress": 100}),
-    )
-    .ok();
-    Ok(())
-}
-
-fn session_log(app: &AppHandle, kind: &str, text: impl Into<String>) {
-    app.emit(
-        "session-log",
-        serde_json::json!({"kind":kind,"text":text.into()}),
-    )
-    .ok();
-}
-
-fn hide_console(command: &mut Command) {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
-    }
-}
-
-fn spawn_streaming(
-    mut command: Command,
-    app: &AppHandle,
-    label: &str,
-) -> Result<std::process::Child, String> {
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    command.env("SFTRANSLATOR_MANAGED_RUNTIME", "1");
-    if let Ok(runtime) = runtime_directory(app) {
-        command.env("UAT_SBD_DIR", runtime.join("minisbd"));
-    }
-    hide_console(&mut command);
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("Falha ao iniciar {label}: {error}"))?;
-    if let Some(stdout) = child.stdout.take() {
-        let handle = app.clone();
-        std::thread::spawn(move || {
-            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                session_log(&handle, "output", line);
-            }
-        });
-    }
-    if let Some(stderr) = child.stderr.take() {
-        let handle = app.clone();
-        std::thread::spawn(move || {
-            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                session_log(&handle, "error", line);
-            }
-        });
-    }
-    Ok(child)
-}
-
-fn run_stage(command: Command, app: &AppHandle, label: &str) -> Result<(), String> {
-    session_log(app, "system", format!("{label}…"));
-    let mut child = spawn_streaming(command, app, label)?;
-    let status = child
-        .wait()
-        .map_err(|error| format!("Falha durante {label}: {error}"))?;
-    if status.success() {
-        session_log(app, "system", format!("{label}: concluído."));
-        Ok(())
-    } else {
-        Err(format!(
-            "{label} terminou com código {}.",
-            status.code().unwrap_or(-1)
-        ))
-    }
-}
-
-fn copy_renpy_tree(source: &Path, destination: &Path) -> Result<(), String> {
-    fs::create_dir_all(destination).map_err(|error| error.to_string())?;
-    for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let path = entry.path();
-        let name = entry.file_name();
-        let lowered = name.to_string_lossy().to_ascii_lowercase();
-        if matches!(
-            lowered.as_str(),
-            "__pycache__"
-                | ".lt-venv"
-                | "ualogs"
-                | "caches"
-                | "uat_config.json"
-                | "uat_session.active"
-        ) {
-            continue;
-        }
-        let target = destination.join(&name);
-        if path.is_dir() {
-            copy_renpy_tree(&path, &target)?;
-        } else {
-            fs::copy(&path, &target)
-                .map_err(|error| format!("Falha ao copiar {}: {error}", path.display()))?;
-        }
-    }
-    Ok(())
-}
-
-fn install_renpy_hook(engine_root: &Path, game: &Game, app: &AppHandle) -> Result<(), String> {
-    let game_root = game_root(game)?;
-    session_log(
-        app,
-        "system",
-        "Motor identificado: Ren'Py. Selecionando hook compatível pela versão do Python interno.",
-    );
-    copy_renpy_tree(&engine_root.join("uat"), &game_root.join("uat"))?;
-    let hook_source = engine_root.join("game/uat_hook.rpy");
-    let hook_destination = game_root.join("game/uat_hook.rpy");
-    if hook_destination.is_file() {
-        let backup = game_root.join("game/uat_hook.rpy.sftranslator.bak");
-        if !backup.exists() {
-            fs::copy(&hook_destination, &backup).map_err(|error| error.to_string())?;
-        }
-    }
-    fs::copy(&hook_source, &hook_destination)
-        .map_err(|error| format!("Falha ao instalar o hook Ren'Py: {error}"))?;
-
-    let config_path = game_root.join("uat/uat_config.json");
-    let template_path = engine_root.join("uat/uat_config.json");
-    let mut config: serde_json::Value = fs::read(&config_path)
-        .ok()
-        .or_else(|| fs::read(template_path).ok())
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_else(|| serde_json::json!({}));
-    config["provider"] = serde_json::json!("local");
-    config["show_console"] = serde_json::json!(false);
-    let flow_is_unchanged = config["source_language"].as_str() == Some(game.source_language.as_str())
-        && config["target_language"].as_str() == Some(game.target_language.as_str());
-    config["source_language"] = serde_json::json!(game.source_language);
-    config["target_language"] = serde_json::json!(game.target_language);
-    config["flow_mode"] = serde_json::json!(game.flow_mode);
-    config["intermediate_language"] = serde_json::json!(game.intermediate_language);
-    let cache_pair = renpy_cache_pair(game);
-    fs::create_dir_all(game_root.join("uat/caches")).map_err(|error| error.to_string())?;
-    if flow_is_unchanged {
-        for (config_key, legacy_name, new_name) in [
-            ("cache_file", "uat_cache.json", format!("uat_cache_{cache_pair}.json")),
-            ("words_file", "uat_words.json", format!("uat_words_{cache_pair}.json")),
-        ] {
-            if config[config_key].as_str() == Some(legacy_name) {
-                let legacy_path = game_root.join("uat").join(legacy_name);
-                let new_path = game_root.join("uat/caches").join(new_name);
-                if legacy_path.is_file() && !new_path.exists() {
-                    fs::rename(legacy_path, new_path).map_err(|error| error.to_string())?;
-                }
-            }
-        }
-    }
-    config["cache_file"] = serde_json::json!(format!("caches/uat_cache_{cache_pair}.json"));
-    config["words_file"] = serde_json::json!(format!("caches/uat_words_{cache_pair}.json"));
-    if !config["local"].is_object() {
-        config["local"] = serde_json::json!({});
-    }
-    config["local"]["endpoint"] = serde_json::json!("http://127.0.0.1:5000/translate");
-    fs::write(
-        &config_path,
-        serde_json::to_vec_pretty(&config).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| format!("Falha ao configurar o hook Ren'Py: {error}"))?;
-    session_log(
-        app,
-        "system",
-        "Hook moderno e legado instalados dentro da pasta do jogo.",
-    );
-    Ok(())
-}
-
-fn tail_translation_log(
-    app: AppHandle,
-    path: PathBuf,
-    stop: Arc<AtomicBool>,
-) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
-        let mut offset = fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
-        while !stop.load(Ordering::Relaxed) {
-            if let Ok(mut file) = OpenOptions::new().read(true).open(&path) {
-                if file.metadata().map(|meta| meta.len()).unwrap_or(0) < offset {
-                    offset = 0;
-                }
-                if file.seek(SeekFrom::Start(offset)).is_ok() {
-                    let mut bytes = Vec::new();
-                    if file.read_to_end(&mut bytes).is_ok() && !bytes.is_empty() {
-                        offset += bytes.len() as u64;
-                        for line in String::from_utf8_lossy(&bytes).lines() {
-                            session_log(&app, "translation", line.to_string());
-                        }
-                    }
-                }
-            }
-            std::thread::sleep(Duration::from_millis(350));
-        }
-    })
-}
-
-fn session_marker_is_fresh(path: &Path) -> bool {
-    path.metadata()
-        .and_then(|metadata| metadata.modified())
-        .and_then(|modified| modified.elapsed().map_err(std::io::Error::other))
-        .map(|elapsed| elapsed <= Duration::from_secs(30))
-        .unwrap_or(false)
-}
-
-fn wait_for_game_exit(
-    child: &mut std::process::Child,
-    session_marker: Option<&Path>,
-    app: &AppHandle,
-) -> i32 {
-    let Some(marker) = session_marker else {
-        return child
-            .wait()
-            .ok()
-            .and_then(|status| status.code())
-            .unwrap_or(-1);
-    };
-
-    let mut marker_seen = false;
-    let mut launcher_exit: Option<(Instant, i32)> = None;
-    loop {
-        let marker_active = session_marker_is_fresh(marker);
-        if marker_active && !marker_seen {
-            marker_seen = true;
-            session_log(
-                app,
-                "system",
-                "Hook conectado. A sessão acompanhará o processo real do jogo.",
-            );
-        }
-
-        if launcher_exit.is_none() {
-            match child.try_wait() {
-                Ok(Some(status)) => {
-                    let code = status.code().unwrap_or(-1);
-                    launcher_exit = Some((Instant::now(), code));
-                    if marker_active {
-                        session_log(
-                            app,
-                            "system",
-                            "Launcher concluído; o jogo continua ativo pelo hook.",
-                        );
-                    }
-                }
-                Ok(None) => {}
-                Err(_) => launcher_exit = Some((Instant::now(), -1)),
-            }
-        }
-
-        if let Some((exited_at, code)) = launcher_exit {
-            if marker_seen {
-                if !marker_active {
-                    return code;
-                }
-            } else if exited_at.elapsed() >= Duration::from_secs(5) {
-                return code;
-            }
-        }
-        std::thread::sleep(Duration::from_millis(250));
-    }
-}
-
-fn update_integration_record(app: &AppHandle, game_id: &str) {
-    let Ok(mut games) = load_games(app) else {
-        return;
-    };
-    let Some(game) = games.iter_mut().find(|game| game.id == game_id) else {
-        return;
-    };
-    let (ready, status) = integration_state(game);
-    game.integration_status = Some(status);
-    game.status = if game.model_installed && ready {
-        "Pronto".into()
-    } else {
-        "Instalação pendente".into()
-    };
-    save_games(app, &games).ok();
-}
-
-fn wait_for_local_server(
-    app: &AppHandle,
-    child: &mut std::process::Child,
-    port: u16,
-) -> Result<(), String> {
-    let address = SocketAddr::from(([127, 0, 0, 1], port));
-    let started = Instant::now();
-    session_log(
-        app,
-        "system",
-        format!("Aguardando o servidor local responder na porta {port}…"),
-    );
-    loop {
-        if TcpStream::connect_timeout(&address, Duration::from_millis(250)).is_ok() {
-            session_log(
-                app,
-                "system",
-                format!("Servidor local online na porta {port}."),
-            );
-            return Ok(());
-        }
-        if let Ok(Some(status)) = child.try_wait() {
-            return Err(format!(
-                "O servidor local encerrou antes de ficar pronto ({status})."
-            ));
-        }
-        if started.elapsed() >= Duration::from_secs(90) {
-            return Err(format!(
-                "O servidor local não respondeu na porta {port} em 90 segundos."
-            ));
-        }
-        std::thread::sleep(Duration::from_millis(300));
-    }
-}
-
-fn run_game_session(app: AppHandle, game: Game, project: PathBuf) -> Result<i32, String> {
-    let executable = native_game_path(Path::new(&game.executable_path));
-    let game_root = executable.parent().ok_or("Pasta do jogo inválida.")?;
-    let mut translation_server;
-    let mut log_tail = None;
-    let stop_tail = Arc::new(AtomicBool::new(false));
-    let server_port = if game.engine == "Unity" { 5001 } else { 5000 };
-
-    if game.engine == "Unity" {
-        let launcher = project.join("unity/lt.exe");
-        if !launcher.is_file() {
-            return Err(format!(
-                "Runtime Unity não encontrado em {}",
-                launcher.display()
-            ));
-        }
-        let universal_models = models_directory(&app)?;
-        session_log(
-            &app,
-            "system",
-            format!(
-                "Unity detectado: {} {}.",
-                game.runtime.as_deref().unwrap_or("runtime desconhecido"),
-                game.architecture
-                    .as_deref()
-                    .unwrap_or("arquitetura desconhecida")
-            ),
-        );
-
-        let (integration_ready, _) = integration_state(&game);
-        if !integration_ready {
-            let mut install = Command::new(&launcher);
-            install
-                .arg("install")
-                .arg(game.runtime.as_deref().unwrap_or("Mono"))
-                .arg(game.architecture.as_deref().unwrap_or("x64"))
-                .current_dir(launcher.parent().unwrap_or(&project))
-                .env("UAT_GAME_DIR", game_root)
-                .env("UAT_STATE_DIR", game_root.join("uat-unity"))
-                .env("UAT_MODELS_DIR", &universal_models)
-                .env("PYTHONIOENCODING", "utf-8");
-            run_stage(install, &app, "Instalando BepInEx e XUnity dentro do jogo")?;
-        } else {
-            session_log(
-                &app,
-                "system",
-                "BepInEx e XUnity já estão instalados e compatíveis.",
-            );
-        }
-
-        let mut config = Command::new(&launcher);
-        config
-            .arg("config")
-            .arg(&game.source_language)
-            .arg(&game.target_language)
-            .arg(&game.flow_mode)
-            .arg(game.intermediate_language.as_deref().unwrap_or(""))
-            .current_dir(launcher.parent().unwrap_or(&project))
-            .env("UAT_GAME_DIR", game_root)
-            .env("UAT_STATE_DIR", game_root.join("uat-unity"))
-            .env("UAT_MODELS_DIR", &universal_models)
-            .env("PYTHONIOENCODING", "utf-8");
-        run_stage(config, &app, "Configurando XUnity e o fluxo universal")?;
-        update_integration_record(&app, &game.id);
-
-        let mut server = Command::new(&launcher);
-        server
-            .arg("server")
-            .current_dir(launcher.parent().unwrap_or(&project))
-            .env("UAT_GAME_DIR", game_root)
-            .env("UAT_STATE_DIR", game_root.join("uat-unity"))
-            .env("UAT_MODELS_DIR", &universal_models)
-            .env("PYTHONIOENCODING", "utf-8");
-        translation_server = spawn_streaming(server, &app, "servidor Unity")?;
-    } else {
-        let engine_root = project.join("renpy");
-        let launcher = engine_root.join("lt.exe");
-        if !launcher.is_file() {
-            return Err(format!(
-                "Runtime Ren'Py não encontrado em {}",
-                launcher.display()
-            ));
-        }
-        install_renpy_hook(&engine_root, &game, &app)?;
-        update_integration_record(&app, &game.id);
-        log_tail = Some(tail_translation_log(
-            app.clone(),
-            game_root.join("uat/UAlogs/uat_log.txt"),
-            stop_tail.clone(),
-        ));
-        let mut server = Command::new(&launcher);
-        server
-            .arg("__server__")
-            .current_dir(game_root.join("uat"))
-            .env("UAT_GAME_DIR", game_root)
-            .env("UAT_MODELS_DIR", models_directory(&app)?)
-            .env("PYTHONIOENCODING", "utf-8");
-        translation_server = spawn_streaming(server, &app, "servidor Ren'Py")?;
-    }
-
-    if let Err(error) = wait_for_local_server(&app, &mut translation_server, server_port) {
-        translation_server.kill().ok();
-        translation_server.wait().ok();
-        stop_tail.store(true, Ordering::Relaxed);
-        if let Some(tail) = log_tail {
-            tail.join().ok();
-        }
-        return Err(error);
-    }
-
-    let session_marker = if game.engine == "Ren'Py" {
-        let path = game_root.join("uat/uat_session.active");
-        fs::remove_file(&path).ok();
-        Some(path)
-    } else {
-        None
-    };
-    session_log(&app, "system", format!("Abrindo o jogo: {}", game.name));
-    let mut command = Command::new(&executable);
-    command.current_dir(game_root).env("SFTRANSLATOR_MANAGED_RUNTIME", "1");
-    let mut child = spawn_streaming(command, &app, "jogo")?;
-    *ACTIVE_GAME_PID.lock().map_err(|_| "Não foi possível registrar o processo do jogo.")? = Some(child.id());
-    let code = wait_for_game_exit(&mut child, session_marker.as_deref(), &app);
-    if let Ok(mut pid) = ACTIVE_GAME_PID.lock() {
-        *pid = None;
-    }
-    session_log(
-        &app,
-        "system",
-        "Jogo encerrado. Finalizando o servidor local.",
-    );
-    translation_server.kill().ok();
-    translation_server.wait().ok();
-    stop_tail.store(true, Ordering::Relaxed);
-    if let Some(tail) = log_tail {
-        tail.join().ok();
-    }
-    Ok(code)
-}
-
-#[tauri::command]
-fn launch_game(app: AppHandle, game_id: String) -> Result<(), String> {
-    let mut games = load_games(&app)?;
-    let game = games
-        .iter_mut()
-        .find(|game| game.id == game_id)
-        .ok_or("Jogo não encontrado.")?;
-    if !game.model_installed {
-        return Err("Instale o modelo configurado antes de iniciar o jogo.".into());
-    }
-    game.last_launch = Some(chrono::Utc::now().to_rfc3339());
-    let game = game.clone();
-    save_games(&app, &games)?;
-    let project = runtime_directory(&app)?;
-    session_log(
-        &app,
-        "system",
-        format!("Preparando sessão para {}…", game.name),
-    );
-    std::thread::spawn(move || {
-        let result = run_game_session(app.clone(), game, project);
-        match result {
-            Ok(code) => {
-                app.emit("session-ended", serde_json::json!({"code":code}))
-                    .ok();
-            }
-            Err(error) => {
-                session_log(&app, "error", error);
-                app.emit("session-ended", serde_json::json!({"code":-1}))
-                    .ok();
-            }
-        }
-    });
-    Ok(())
-}
-
-fn project_root() -> Option<PathBuf> {
-    let executable = std::env::current_exe().ok();
-    let cwd = std::env::current_dir().ok();
-    executable.as_deref().and_then(Path::parent).into_iter()
-        .chain(cwd.as_deref())
-        .chain(Some(Path::new(env!("CARGO_MANIFEST_DIR"))))
-        .find_map(|base| base.ancestors().find(|candidate| {
-            candidate.join("engines/uat-renpy").is_dir() && candidate.join("engines/uat-unity").is_dir()
-        }).map(Path::to_path_buf))
-}
-
-fn models_directory(app: &AppHandle) -> Result<PathBuf, String> {
-    let destination = app.path().app_data_dir().map_err(|e| e.to_string())?.join("models");
-    if !destination.exists() {
-        if let Some(root) = project_root() {
-            let legacy = root.join("engines/uat-renpy/models");
-            if legacy.is_dir() { copy_renpy_tree(&legacy, &destination)?; }
-        }
-        fs::create_dir_all(&destination).map_err(|e| e.to_string())?;
-    }
-    Ok(destination)
-}
-
-#[tauri::command]
-fn stop_game_session() -> Result<(), String> {
-    let pid = ACTIVE_GAME_PID
-        .lock()
-        .map_err(|_| "Não foi possível acessar a sessão atual.")?
-        .ok_or("Nenhum jogo está em execução.")?;
-    #[cfg(windows)]
-    {
-        let status = Command::new("taskkill.exe")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .status()
-            .map_err(|error| format!("Não foi possível encerrar o jogo: {error}"))?;
-        if !status.success() {
-            return Err("O Windows não conseguiu encerrar o jogo.".into());
-        }
-    }
-    #[cfg(not(windows))]
-    return Err("Encerrar jogos pela interface está disponível apenas no Windows.".into());
-    Ok(())
+    engines::by_name(&game.engine)?.clear_cache(&game)
 }
 
 fn runtime_directory(app: &AppHandle) -> Result<PathBuf, String> {
@@ -1297,98 +524,17 @@ fn runtime_directory(app: &AppHandle) -> Result<PathBuf, String> {
     if cfg!(debug_assertions) {
         candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/runtimes"));
     }
-    candidates.into_iter().find(|root| root.join("unity/lt.exe").is_file() && root.join("renpy/lt.exe").is_file())
+    candidates.into_iter().find(|root| root.is_dir())
         .ok_or_else(|| "Motores integrados ausentes. Reinstale o SFTranslator usando o instalador completo.".into())
 }
 
 #[tauri::command]
 fn engine_health(app: AppHandle) -> Vec<EngineHealth> {
-    let Ok(root) = runtime_directory(&app) else {
-        return vec![
-            EngineHealth {
-                engine: "Ren'Py".into(),
-                source_found: false,
-                runtime_found: false,
-                model_found: false,
-                details: "Fontes legadas fora do ambiente de desenvolvimento.".into(),
-            },
-            EngineHealth {
-                engine: "Unity".into(),
-                source_found: false,
-                runtime_found: false,
-                model_found: false,
-                details: "Fontes legadas fora do ambiente de desenvolvimento.".into(),
-            },
-        ];
-    };
-    let renpy = root.join("renpy");
-    let unity = root.join("unity");
-    let models_present = models_directory(&app).map(|path| !catalog::installed_packages(&path.join("argos-translate")).is_empty()).unwrap_or(false);
-    vec![
-        EngineHealth {
-            engine: "Ren'Py".into(),
-            source_found: renpy.join("uat/uat_hook.py").is_file(),
-            runtime_found: renpy.join("lt.exe").is_file(),
-            model_found: models_present,
-            details: "Hook moderno e legado; servidor local LibreTranslate/Argos.".into(),
-        },
-        EngineHealth {
-            engine: "Unity".into(),
-            source_found: unity.join("lt.exe").is_file(),
-            runtime_found: unity.join("lt.exe").is_file(),
-            model_found: models_present,
-            details: "Instalador BepInEx/XUnity para Mono e IL2CPP usando a biblioteca universal."
-                .into(),
-        },
-    ]
-}
-
-#[tauri::command]
-fn list_models(app: AppHandle) -> Result<Vec<TranslationModel>, String> {
-    let games = load_games(&app).unwrap_or_default();
-    let models_root = models_directory(&app)?.join("argos-translate");
-    let installed = catalog::installed_packages(&models_root);
-    let mut catalog = catalog::load_catalog(&models_root);
-    for value in installed.values() {
-        catalog.retain(|entry| catalog::pair_id(entry) != catalog::pair_id(value));
-        catalog.push(value.clone());
-    }
-    Ok(catalog
-        .into_iter()
-        .filter_map(|value| {
-            let from_code = value.get("from_code")?.as_str()?.to_string();
-            let to_code = value.get("to_code")?.as_str()?.to_string();
-            let id = format!("{from_code}-{to_code}");
-            let used_by = games
-                .iter()
-                .filter(|game| {
-                    game.model_installed && required_model_ids(game).iter().any(|pair| pair == &id)
-                })
-                .count();
-            Some(TranslationModel {
-                installed: installed.contains_key(&id),
-                id,
-                from_name: value
-                    .get("from_name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or(&from_code)
-                    .to_string(),
-                to_name: value
-                    .get("to_name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or(&to_code)
-                    .to_string(),
-                version: value
-                    .get("package_version")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("—")
-                    .to_string(),
-                from_code,
-                to_code,
-                used_by,
-            })
-        })
-        .collect())
+    let runtimes = runtime_directory(&app).ok();
+    let models_present = models_directory(&app)
+        .map(|path| !catalog::installed_packages(&path.join("argos-translate")).is_empty())
+        .unwrap_or(false);
+    engines::health(runtimes.as_deref(), models_present)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1405,12 +551,18 @@ pub fn run() {
             clear_game_cache,
             get_settings,
             update_settings,
-            delete_model,
-            download_model,
-            launch_game,
-            stop_game_session,
+            models::delete_model,
+            models::download_model,
+            session::launch_game,
+            session::stop_game_session,
             engine_health,
-            list_models
+            models::list_models,
+            updater::check_for_updates,
+            updater::update_download_status,
+            updater::download_update,
+            updater::cancel_update_download,
+            updater::install_downloaded_update,
+            updater::open_release_page
         ])
         .run(tauri::generate_context!())
         .expect("erro ao iniciar UAT Desktop");
@@ -1439,5 +591,40 @@ mod tests {
         assert_eq!(required_model_ids(&chained), ["ja-en", "en-pb"]);
         assert_eq!(renpy_cache_pair(&chained), "ja_en_pb");
         assert_eq!(required_model_ids(&game("direct", None)), ["ja-pb"]);
+    }
+
+    #[test]
+    fn rpg_maker_locale_identifies_chinese_before_configuring_models() {
+        let root = std::env::temp_dir().join(format!("sftranslator-locale-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(root.join("data")).unwrap();
+        fs::write(root.join("Game.exe"), b"fixture").unwrap();
+        fs::write(root.join("data/System.json"), br#"{"locale":"zh_CN"}"#).unwrap();
+        assert_eq!(inspect_language(&root.join("Game.exe"), "RPG Maker"), ("zh".into(), 0.98));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn registered_engines_recognize_existing_games() {
+        let root = std::env::temp_dir().join(format!("sftranslator-engines-{}", uuid::Uuid::new_v4()));
+        let renpy_root = root.join("renpy-game");
+        let unity_root = root.join("unity-game");
+        fs::create_dir_all(renpy_root.join("game")).unwrap();
+        fs::create_dir_all(unity_root.join("Sample_Data/Managed")).unwrap();
+        let renpy_exe = renpy_root.join("Sample.exe");
+        let unity_exe = unity_root.join("Sample.exe");
+        fs::write(&renpy_exe, b"fixture").unwrap();
+        fs::write(renpy_root.join("game/script.rpyc"), b"fixture").unwrap();
+        fs::write(&unity_exe, b"fixture").unwrap();
+        fs::write(unity_root.join("Sample_Data/Managed/Assembly-CSharp.dll"), b"fixture").unwrap();
+
+        let result = (|| {
+            assert_eq!(inspect_game(&renpy_exe)?.0, "Ren'Py");
+            let unity = inspect_game(&unity_exe)?;
+            assert_eq!(unity.0, "Unity");
+            assert_eq!(unity.1.as_deref(), Some("Mono"));
+            Ok::<_, String>(())
+        })();
+        fs::remove_dir_all(root).unwrap();
+        result.unwrap();
     }
 }

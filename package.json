@@ -1,11 +1,12 @@
 {
   "name": "uat-desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "test:rpgmaker": "node --test engines/rpgmaker/mz/SFTranslator.test.cjs",
     "release": "powershell -ExecutionPolicy Bypass -File scripts/release.ps1",
     "runtimes": "powershell -ExecutionPolicy Bypass -File scripts/prepare-runtimes.ps1",
     "tauri": "tauri"

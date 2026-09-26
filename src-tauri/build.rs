@@ -1,6 +1,8 @@
 fn main() {
     if std::env::var("PROFILE").as_deref() == Ok("release") {
-        for asset in ["unity/lt.exe", "renpy/lt.exe", "manifest.json", "minisbd/en.onnx"] {
+        for asset in ["unity/lt.exe", "renpy/lt.exe", "manifest.json", "minisbd/en.onnx",
+            "unreal/dwmapi.dll", "unreal/ue4ss/UE4SS.dll",
+            "unreal/ue4ss/Mods/SFTranslatorObserver/Scripts/main.lua"] {
             assert!(std::path::Path::new("resources/runtimes").join(asset).is_file(),
                 "Motor integrado ausente: {asset}. Execute npm run runtimes antes do build de distribuição.");
         }

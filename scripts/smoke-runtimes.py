@@ -71,6 +71,10 @@ def main():
                         (state / "unity_uat_config.json").write_text(json.dumps(config))
                         direct = translate(port, "Hello, how are you?", "en", "pb")
                         print(f"PASS unity direct: {direct}", flush=True)
+                        unicode_result = translate(port, "Hello 👋, café!", "en", "pb")
+                        if "👋" not in unicode_result or "café" not in unicode_result.lower():
+                            raise RuntimeError(f"Unicode was lost by the frozen runtime: {unicode_result!r}")
+                        print(f"PASS unity Unicode: {unicode_result}", flush=True)
                 except Exception:
                     log.seek(0)
                     print(log.read(), flush=True)
