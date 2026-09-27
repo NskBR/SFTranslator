@@ -24,7 +24,7 @@ pub(super) fn cache_path(game: &Game) -> Result<PathBuf, String> {
     Ok(mz::cache_path(&game_root(game)?, game))
 }
 
-fn detect_family(root: &Path, executable: &Path) -> Option<&'static str> {
+fn detect_family(root: &Path, _executable: &Path) -> Option<&'static str> {
     let web = if root.join("www/js").is_dir() {
         root.join("www")
     } else {
@@ -36,20 +36,17 @@ fn detect_family(root: &Path, executable: &Path) -> Option<&'static str> {
     if web.join("js/rpg_core.js").is_file() && web.join("js/rpg_windows.js").is_file() {
         return Some("MV");
     }
-    if root.join("Data/Actors.rvdata2").is_file() {
+    if root.join("Data/Actors.rvdata2").is_file() || root.join("Game.rgss3a").is_file() {
         return Some("VX Ace");
     }
-    if root.join("Data/Actors.rvdata").is_file() {
+    if root.join("Data/Actors.rvdata").is_file() || root.join("Game.rgss2a").is_file() {
         return Some("VX");
     }
-    if root.join("Data/Actors.rxdata").is_file() {
+    if root.join("Data/Actors.rxdata").is_file() || root.join("Game.rgssad").is_file() {
         return Some("XP");
     }
     if root.join("RPG_RT.ldb").is_file()
         && root.join("RPG_RT.lmt").is_file()
-        && executable
-            .file_name()
-            .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("RPG_RT.exe"))
     {
         return Some("2000/2003");
     }
@@ -101,7 +98,7 @@ impl EngineAdapter for RpgMaker {
     }
 
     fn translation_available(&self, game: &Game) -> bool {
-        matches!(game.runtime.as_deref(), Some("MV" | "MZ" | "Unite Mono" | "Unite IL2CPP"))
+        matches!(game.runtime.as_deref(), Some("95" | "2000/2003" | "XP" | "VX" | "VX Ace" | "MV" | "MZ" | "Unite Mono" | "Unite IL2CPP"))
     }
 
     fn inspect(&self, executable: &Path) -> Option<EngineMatch> {
@@ -130,10 +127,10 @@ impl EngineAdapter for RpgMaker {
                 (false, format!("Plugin experimental {family} será instalado ao iniciar"))
             };
         }
-        (
-            false,
-            "Em desenvolvimento inicial: tradução ainda não integrada".into(),
-        )
+        if matches!(game.runtime.as_deref(), Some("95" | "2000/2003" | "XP" | "VX" | "VX Ace")) {
+            return (true, "OCR local experimental será iniciado junto com o jogo; sobreposição depende da janela e dos idiomas OCR instalados no Windows".into());
+        }
+        (false, "Versão RPG Maker não identificada; selecione uma família compatível".into())
     }
 
     fn cache_directory(&self, game: &Game) -> Result<PathBuf, String> {
@@ -196,22 +193,24 @@ impl EngineAdapter for RpgMaker {
                 serde_json::to_vec_pretty(&config).map_err(|error| error.to_string())?,
             )
             .map_err(|error| error.to_string())?;
-            let family = game.runtime.as_deref().unwrap_or("MZ");
-            if family == "MV" {
-                mv::install(&root, game, port)?;
+            let family = game.runtime.as_deref().ok_or("Família RPG Maker não definida.")?;
+            if matches!(family, "MV" | "MZ") {
+                if family == "MV" { mv::install(&root, game, port)?; }
+                else { mz::install(&root, game, port)?; }
+                let installed = if family == "MV" { mv::integration_ready(&root) } else { mz::integration_ready(&root) };
+                if !installed {
+                    return Err(format!("O plugin RPG Maker {family} não ficou ativo em js/plugins.js. Confira permissões e antivírus antes de abrir o jogo."));
+                }
+                session_log(app, "system", format!("Plugin RPG Maker {family} configurado."));
             } else {
-                mz::install(&root, game, port)?;
-            }
-            let installed = if family == "MV" { mv::integration_ready(&root) } else { mz::integration_ready(&root) };
-            if !installed {
-                return Err(format!("O plugin RPG Maker {family} não ficou ativo em js/plugins.js. Confira permissões e antivírus antes de abrir o jogo."));
+                session_log(app, "system", format!("RPG Maker {family}: OCR local experimental preparado. Nenhum arquivo do jogo foi alterado."));
             }
             update_integration_record(app, &game.id);
             session_log(
                 app,
                 "system",
                 format!(
-                    "Plugin RPG Maker {family} configurado para {} → {}. Porta local {port}.",
+                    "RPG Maker {family} configurado para {} → {}. Porta local {port}.",
                     game.source_language.to_uppercase(),
                     game.target_language.to_uppercase()
                 ),
@@ -248,6 +247,24 @@ impl EngineAdapter for RpgMaker {
         })
     }
 
+    fn start_observer(&self, app: &AppHandle, game: &Game, runtimes: &Path, pid: u32) -> Result<Option<std::process::Child>, String> {
+        if !matches!(game.runtime.as_deref(), Some("95" | "2000/2003" | "XP" | "VX" | "VX Ace")) { return Ok(None); }
+        let launcher = runtimes.join("unity/lt.exe");
+        let cache = cache_path(game)?;
+        fs::create_dir_all(&cache).map_err(|error| error.to_string())?;
+        let state = app.path().app_data_dir().map_err(|error| error.to_string())?.join("rpgmaker").join(&game.id);
+        let config: serde_json::Value = serde_json::from_slice(&fs::read(state.join("unity_uat_config.json")).map_err(|error| error.to_string())?).map_err(|error| error.to_string())?;
+        let port = config["server"]["port"].as_u64().ok_or("Porta OCR não configurada")?;
+        let mut command = Command::new(launcher);
+        command.args(["__rpgmaker_ocr__", &pid.to_string(), &port.to_string(), &game.source_language, &game.target_language])
+            .env("UAT_OCR_CACHE", cache.join("ocr.json"))
+            .env("UAT_OCR_CAPTURE", state.join("ocr-capture.png"))
+            .env("PYTHONIOENCODING", "utf-8")
+            .current_dir(runtimes.join("unity"));
+        session_log(app, "system", format!("Iniciando OCR experimental para RPG Maker {} (PID {pid}).", game.runtime.as_deref().unwrap_or("?")));
+        Ok(Some(spawn_streaming(command, app, "OCR RPG Maker")?))
+    }
+
     fn health(&self, runtimes: Option<&Path>, models_present: bool) -> EngineHealth {
         EngineHealth {
             engine: self.name().into(),
@@ -255,7 +272,7 @@ impl EngineAdapter for RpgMaker {
             runtime_found: runtimes.is_some_and(|root| root.join("unity/lt.exe").is_file()),
             model_found: models_present,
             development: true,
-            details: "MV/MZ usam plugin JavaScript; Unite usa BepInEx/XUnity quando identificado. 95, 2000/2003 e RGSS ainda não têm hook de tradução.".into(),
+            details: "MV/MZ usam plugin JavaScript; Unite usa BepInEx/XUnity; 95, 2000/2003 e RGSS usam OCR local experimental com sobreposição, sujeito ao idioma OCR e ao modo de janela.".into(),
         }
     }
 
@@ -278,6 +295,23 @@ mod tests {
         fs::write(root.join("js/rmmz_core.js"), b"fixture").unwrap();
         fs::write(root.join("js/rmmz_windows.js"), b"fixture").unwrap();
         assert_eq!(detect_family(&root, &root.join("Game.exe")), Some("MZ"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn detects_encrypted_rgss_and_renamed_2003_games() {
+        let root = std::env::temp_dir().join(format!("sftranslator-rpgm-legacy-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let game = root.join("Renamed.exe");
+        fs::write(&game, b"fixture").unwrap();
+        for (archive, family) in [("Game.rgssad", "XP"), ("Game.rgss2a", "VX"), ("Game.rgss3a", "VX Ace")] {
+            fs::write(root.join(archive), b"fixture").unwrap();
+            assert_eq!(detect_family(&root, &game), Some(family));
+            fs::remove_file(root.join(archive)).unwrap();
+        }
+        fs::write(root.join("RPG_RT.ldb"), b"fixture").unwrap();
+        fs::write(root.join("RPG_RT.lmt"), b"fixture").unwrap();
+        assert_eq!(detect_family(&root, &game), Some("2000/2003"));
         fs::remove_dir_all(root).unwrap();
     }
 

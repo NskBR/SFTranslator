@@ -13,7 +13,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 static ACTIVE_GAME_PID: Mutex<Option<u32>> = Mutex::new(None);
 static ACTIVE_SESSION: AtomicBool = AtomicBool::new(false);
@@ -189,7 +189,9 @@ pub(crate) fn update_integration_record(app: &AppHandle, game_id: &str) {
     };
     let (ready, status) = integration_state(game);
     game.integration_status = Some(status);
-    game.status = if game.model_installed && ready {
+    game.status = if game.engine == "RPG Maker" && matches!(game.runtime.as_deref(), Some("95" | "2000/2003" | "XP" | "VX" | "VX Ace")) && game.model_installed {
+        "Em teste".into()
+    } else if game.model_installed && ready {
         "Pronto".into()
     } else {
         "Instalação pendente".into()
@@ -287,7 +289,21 @@ fn run_game_session(app: AppHandle, game: Game, project: PathBuf) -> Result<i32,
     *ACTIVE_GAME_PID
         .lock()
         .map_err(|_| "Não foi possível registrar o processo do jogo.")? = Some(child.id());
+    let mut observer = match adapter.start_observer(&app, &game, &project, child.id()) {
+        Ok(observer) => observer,
+        Err(error) => {
+            session_log(&app, "error", format!("Observador de tradução não iniciou: {error}"));
+            None
+        }
+    };
     let code = wait_for_game_exit(&mut child, marker.as_deref(), &app);
+    if let Some(process) = observer.as_mut() {
+        process.kill().ok();
+        process.wait().ok();
+        if let Ok(data) = app.path().app_data_dir() {
+            fs::remove_file(data.join("rpgmaker").join(&game.id).join("ocr-capture.png")).ok();
+        }
+    }
     if let Ok(mut pid) = ACTIVE_GAME_PID.lock() {
         *pid = None;
     }

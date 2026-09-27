@@ -42,6 +42,13 @@ pub(super) trait EngineAdapter: Sync {
         runtimes: &Path,
         stop_tail: Arc<AtomicBool>,
     ) -> Result<EngineSession, String>;
+    fn start_observer(
+        &self,
+        _app: &AppHandle,
+        _game: &Game,
+        _runtimes: &Path,
+        _pid: u32,
+    ) -> Result<Option<Child>, String> { Ok(None) }
     fn health(&self, runtimes: Option<&Path>, models_present: bool) -> EngineHealth;
     fn runtime_ready(&self, runtimes: &Path) -> bool;
 }

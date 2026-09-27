@@ -36,6 +36,7 @@ minisbd==0.9.5
 numpy==1.26.4
 onnxruntime==1.30.0
 packaging==23.1
+Pillow==12.3.0
 pefile==2024.8.26
 polib==1.1.1
 prometheus-client==0.15.0
@@ -47,6 +48,13 @@ pymupdf==1.28.2
 pysrt==1.1.2
 pytz==2026.3.post1
 pywin32-ctypes==0.2.3
+winrt-Windows.Foundation==3.2.1
+winrt-Windows.Foundation.Collections==3.2.1
+winrt-Windows.Globalization==3.2.1
+winrt-Windows.Graphics.Imaging==3.2.1
+winrt-Windows.Media.Ocr==3.2.1
+winrt-Windows.Storage==3.2.1
+winrt-Windows.Storage.Streams==3.2.1
 PyYAML==6.0.3
 redis==4.4.4
 regex==2026.9.10

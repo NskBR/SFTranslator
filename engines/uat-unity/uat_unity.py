@@ -1772,6 +1772,13 @@ def menu():
 def main():
     args = sys.argv[1:]
     command = args[0].lower() if args else ''
+    if command == '__rpgmaker_ocr__':
+        if not getattr(sys, 'frozen', False):
+            sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'rpgmaker', 'ocr')))
+        from sftranslator_ocr import main as ocr_main
+        if len(args) != 5:
+            raise SystemExit('OCR requer PID, porta, origem e destino')
+        raise SystemExit(ocr_main(int(args[1]), int(args[2]), args[3], args[4]))
     if command in ('__server__', 'server'):
         _run_server_forever()
         return

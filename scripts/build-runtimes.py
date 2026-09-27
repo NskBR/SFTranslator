@@ -25,6 +25,9 @@ def main():
         destination = OUTPUT / engine
         command = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--onedir", "--name", "lt",
                    "--distpath", str(destination), "--workpath", str(WORK / engine), "--specpath", str(WORK / engine)]
+        if engine == "unity":
+            command += ["--paths", str(ENGINES / "rpgmaker/ocr"), "--hidden-import", "sftranslator_ocr",
+                        "--collect-all", "winrt", "--collect-all", "PIL"]
         for module in modules:
             command += ["--collect-all", module]
         command += ["--copy-metadata", "libretranslate", "--copy-metadata", "argos-translate-lt", str(source)]

@@ -300,6 +300,8 @@ fn list_games(app: AppHandle) -> Result<Vec<Game>, String> {
         }
         let status = if engines::by_name(&game.engine).is_ok_and(|adapter| !adapter.translation_available(game)) {
             "Em desenvolvimento"
+        } else if game.engine == "RPG Maker" && matches!(game.runtime.as_deref(), Some("95" | "2000/2003" | "XP" | "VX" | "VX Ace")) && game.model_installed {
+            "Em teste"
         } else if game.model_installed && integration_ready {
             "Pronto"
         } else if game.model_installed {
@@ -373,7 +375,7 @@ fn add_game(app: AppHandle, executable_path: String, engine_hint: Option<String>
         game.status = "Em desenvolvimento".into();
     }
     if game.engine == "RPG Maker" {
-        if matches!(game.runtime.as_deref(), Some("MV" | "MZ" | "Unite Mono" | "Unite IL2CPP")) {
+        if engines::by_name(&game.engine).is_ok_and(|adapter| adapter.translation_available(&game)) {
             game.status = "Modelo necessário".into();
         }
         if matches!(game.name.as_str(), "Game" | "RPG_RT") {
@@ -425,6 +427,7 @@ fn configure_game(
     target_language: String,
     flow_mode: String,
     intermediate_language: Option<String>,
+    rpg_maker_family: Option<String>,
 ) -> Result<Game, String> {
     if flow_mode != "direct" && flow_mode != "chain" {
         return Err("Modo de fluxo inválido.".into());
@@ -437,6 +440,14 @@ fn configure_game(
         .iter_mut()
         .find(|game| game.id == game_id)
         .ok_or("Jogo não encontrado.")?;
+    if game.engine == "RPG Maker" {
+        if let Some(family) = rpg_maker_family {
+            if !matches!(family.as_str(), "95" | "2000/2003" | "XP" | "VX" | "VX Ace" | "MV" | "MZ" | "Unite Mono" | "Unite IL2CPP") {
+                return Err("Versão RPG Maker inválida.".into());
+            }
+            game.runtime = Some(family);
+        }
+    }
     if flow_mode == "chain" && !load_settings(&app)?.enable_experimental_chained_flow && game.flow_mode != "chain" {
         return Err("Ative o fluxo experimental nas Configurações antes de criar uma cadeia.".into());
     }
@@ -450,6 +461,8 @@ fn configure_game(
     game.integration_status = Some(integration_status);
     game.status = if engines::by_name(&game.engine).is_ok_and(|adapter| !adapter.translation_available(game)) {
         "Em desenvolvimento".into()
+    } else if game.engine == "RPG Maker" && matches!(game.runtime.as_deref(), Some("95" | "2000/2003" | "XP" | "VX" | "VX Ace")) && game.model_installed {
+        "Em teste".into()
     } else if game.model_installed && integration_ready {
         "Pronto".into()
     } else if game.model_installed {

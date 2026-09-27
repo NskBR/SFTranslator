@@ -15,7 +15,7 @@ const presentations: EnginePresentation[] = [renpyPresentation, unityPresentatio
 
 export function isTestOnlyGame(game: Pick<Game, "engine" | "runtime" | "executablePath">): boolean {
   return (game.engine === "Unreal" && !/(CatIslandPetrichor|WomanSimulator)/i.test(game.executablePath)) || (game.engine === "RPG Maker" &&
-    !["MV", "MZ", "Unite Mono", "Unite IL2CPP"].includes(game.runtime || ""));
+    !["95", "2000/2003", "XP", "VX", "VX Ace", "MV", "MZ", "Unite Mono", "Unite IL2CPP"].includes(game.runtime || ""));
 }
 
 export function enginePresentation(name: string): EnginePresentation {

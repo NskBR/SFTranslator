@@ -77,7 +77,7 @@ function App() {
     else setHealth([
       { engine: "Ren'Py", sourceFound: true, runtimeFound: true, modelFound: true, details: "Hook moderno e legado; servidor local LibreTranslate/Argos." },
       { engine: "Unity", sourceFound: true, runtimeFound: true, modelFound: false, details: "Instalador BepInEx/XUnity para Mono e IL2CPP." },
-      { engine: "RPG Maker", sourceFound: true, runtimeFound: true, modelFound: false, development: true, details: "MV/MZ e Unite com tradução experimental; demais versões em testes de cadastro." },
+      { engine: "RPG Maker", sourceFound: true, runtimeFound: true, modelFound: false, development: true, details: "MV/MZ e Unite com hooks experimentais; versões antigas com OCR local e sobreposição em teste." },
       { engine: "Unreal", sourceFound: true, runtimeFound: true, modelFound: false, development: true, details: "Observador de texto experimental para CatIslandPetrichor; tradução ainda não implementada." }
     ]);
   }, []);
@@ -158,18 +158,18 @@ function App() {
     setPage("Adicionar jogo");
   };
 
-  const configureGame = async (game: Game, sourceLanguage: string, targetLanguage: string, flowMode: "direct"|"chain", intermediateLanguage?: string) => {
+  const configureGame = async (game: Game, sourceLanguage: string, targetLanguage: string, flowMode: "direct"|"chain", intermediateLanguage?: string, rpgMakerFamily?: string) => {
     try {
-      const testOnly = isTestOnlyGame(game);
+      const testOnly = isTestOnlyGame({...game,runtime:rpgMakerFamily||game.runtime});
       const pairs = flowMode === "chain" ? [[sourceLanguage, "en"], ["en", targetLanguage]] : [[sourceLanguage, targetLanguage]];
       for (const [from, to] of pairs) {
         const requiredModel = models.find(model => model.fromCode === from && model.toCode === to);
         if (!requiredModel) throw new Error(`Fluxo indisponível: ${from.toUpperCase()} → ${to.toUpperCase()}`);
         if (!testOnly && !requiredModel.installed && !await downloadModel(requiredModel)) return;
       }
-      const updated = await invoke<Game>("configure_game", { gameId: game.id, sourceLanguage, targetLanguage, flowMode, intermediateLanguage });
+      const updated = await invoke<Game>("configure_game", { gameId: game.id, sourceLanguage, targetLanguage, flowMode, intermediateLanguage, rpgMakerFamily });
       await refresh(); setSelectedGame(undefined); setPage("Biblioteca");
-      setToast(testOnly ? "Configuração de teste salva. A tradução deste motor ainda não está integrada." : game.engine === "Unreal" ? "Fluxo Unreal experimental salvo. O hook será atualizado ao iniciar o jogo." : game.engine === "RPG Maker" ? `Fluxo ${game.runtime} experimental salvo. A integração será instalada ao iniciar o jogo.` : updated.modelInstalled ? "Configuração salva. O fluxo está disponível." : "Configuração salva. Baixe o fluxo necessário em Modelos.");
+      setToast(testOnly ? "Escolha uma versão compatível para testar a tradução." : game.engine === "Unreal" ? "Fluxo Unreal experimental salvo. O hook será atualizado ao iniciar o jogo." : game.engine === "RPG Maker" ? ["95","2000/2003","XP","VX","VX Ace"].includes(rpgMakerFamily||game.runtime||"") ? `Fluxo ${rpgMakerFamily} salvo. O OCR local experimental será iniciado com o jogo.` : `Fluxo ${rpgMakerFamily||game.runtime} experimental salvo. A integração será instalada ao iniciar o jogo.` : updated.modelInstalled ? "Configuração salva. O fluxo está disponível." : "Configuração salva. Baixe o fluxo necessário em Modelos.");
     } catch (e) { setToast(String(e)); }
   };
 
