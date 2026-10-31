@@ -880,29 +880,57 @@ def _xunity_dlls():
 
 def _existing_bepinex_runtime():
     core = os.path.join(GAME_DIR, 'BepInEx', 'core')
-    if os.path.isfile(os.path.join(core, 'BepInEx.Unity.IL2CPP.dll')):
+    variants = []
+    for name, runtime, generation in (
+        ('BepInEx.dll', 'Mono', 5),
+        ('BepInEx.Unity.Mono.dll', 'Mono', 6),
+        ('BepInEx.Unity.IL2CPP.dll', 'IL2CPP', 6),
+    ):
+        if os.path.isfile(os.path.join(core, name)):
+            variants.append((runtime, generation))
+    return variants[0] if len(variants) == 1 else ('Ambiguo', 0) if variants else (None, None)
+
+
+def _xunity_runtime():
+    plugin = os.path.join(GAME_DIR, 'BepInEx', 'plugins', 'XUnity.AutoTranslator')
+    core = os.path.join(plugin, 'XUnity.AutoTranslator.Plugin.Core.dll')
+    mono = os.path.join(plugin, 'XUnity.AutoTranslator.Plugin.BepInEx.dll')
+    il2cpp = os.path.join(plugin, 'XUnity.AutoTranslator.Plugin.BepInEx-IL2CPP.dll')
+    common = os.path.join(GAME_DIR, 'BepInEx', 'core', 'XUnity.Common.dll')
+    custom = os.path.join(plugin, 'Translators', 'CustomTranslate.dll')
+    redirector = os.path.join(GAME_DIR, 'BepInEx', 'plugins', 'XUnity.ResourceRedirector')
+    if not all(os.path.isfile(path) for path in (core, common, custom)):
+        return None
+    if os.path.isfile(mono) and not os.path.isfile(il2cpp) and os.path.isfile(
+            os.path.join(redirector, 'XUnity.ResourceRedirector.BepInEx.dll')):
+        return 'Mono'
+    if os.path.isfile(il2cpp) and not os.path.isfile(mono) and os.path.isfile(
+            os.path.join(redirector, 'XUnity.ResourceRedirector.BepInEx-IL2CPP.dll')):
         return 'IL2CPP'
-    if os.path.isfile(os.path.join(core, 'BepInEx.dll')):
-        return 'Mono'
-    if os.path.isfile(os.path.join(core, 'BepInEx.Unity.Mono.dll')):
-        return 'Mono'
     return None
 
 def installation_status(info=None):
     info = info or detect_game()
     runtime = info.get('runtime')
-    existing = _existing_bepinex_runtime()
+    existing, generation = _existing_bepinex_runtime()
+    xunity_runtime = _xunity_runtime()
     return {
-        'bepinex': bool(existing),
+        'bepinex': existing in ('Mono', 'IL2CPP'),
         'bepinex_runtime': existing,
+        'bepinex_generation': generation,
+        'bepinex_present': os.path.exists(os.path.join(GAME_DIR, 'BepInEx')),
         'runtime_match': not existing or runtime == 'Unknown' or existing == runtime,
-        'xunity': bool(_xunity_dlls()),
+        'xunity': bool(xunity_runtime),
+        'xunity_runtime': xunity_runtime,
+        'xunity_present': bool(_xunity_dlls()) or os.path.exists(os.path.join(GAME_DIR, 'BepInEx', 'plugins', 'XUnity.AutoTranslator')),
         'config': os.path.isfile(os.path.join(GAME_DIR, 'BepInEx', 'config', 'AutoTranslatorConfig.ini')),
     }
 
 def is_first_run():
     status = installation_status()
-    return not (status['bepinex'] and status['xunity'] and status['runtime_match'])
+    return not (status['bepinex'] and status['xunity'] and status['runtime_match']
+                and status['bepinex_runtime'] == status['xunity_runtime']
+                and status['bepinex_generation'] == (5 if status['bepinex_runtime'] == 'Mono' else 6))
 
 # =========================================================================
 # DOWNLOAD + EXTRACAO
@@ -991,15 +1019,63 @@ def _extract_safe(zip_path, dest):
                 raise RuntimeError('caminho inseguro no ZIP: {}'.format(member.filename))
         z.extractall(root)
 
-def _merge_tree(source, destination):
-    os.makedirs(destination, exist_ok=True)
-    for name in os.listdir(source):
-        src = os.path.join(source, name)
-        dst = os.path.join(destination, name)
-        if os.path.isdir(src):
-            shutil.copytree(src, dst, dirs_exist_ok=True)
-        else:
-            shutil.copy2(src, dst)
+def _copy_missing_only(stages, destination):
+    """Preflight all files before copying; never replace an existing mod or loader."""
+    planned = []
+    seen = {}
+    destination_real = os.path.realpath(destination)
+    for stage in stages:
+        for root, _dirs, files in os.walk(stage):
+            for name in files:
+                source = os.path.join(root, name)
+                relative = os.path.relpath(source, stage)
+                target = os.path.join(destination, relative)
+                if os.path.commonpath((destination_real, os.path.realpath(target))) != destination_real:
+                    raise RuntimeError('destino fora da pasta do jogo: {}'.format(target))
+                key = os.path.normcase(os.path.abspath(target))
+                if key in seen:
+                    if _sha256(source) != _sha256(seen[key]):
+                        raise RuntimeError('pacotes fornecem versoes diferentes de {}'.format(relative))
+                    continue
+                seen[key] = source
+                parent = os.path.dirname(target)
+                while os.path.normcase(parent) != os.path.normcase(destination):
+                    if os.path.lexists(parent) and not os.path.isdir(parent):
+                        raise RuntimeError('pasta de destino ocupada por arquivo: {}'.format(parent))
+                    parent = os.path.dirname(parent)
+                if os.path.lexists(target):
+                    if not os.path.isfile(target) or _sha256(source) != _sha256(target):
+                        raise RuntimeError('arquivo existente diferente: {}. Nenhum arquivo foi substituido; '
+                                           'repare a instalacao manualmente antes de continuar.'.format(target))
+                else:
+                    planned.append((source, target))
+    created = []
+    created_dirs = []
+    try:
+        for source, target in planned:
+            parent = os.path.dirname(target)
+            missing_dirs = []
+            while not os.path.isdir(parent):
+                missing_dirs.append(parent)
+                parent = os.path.dirname(parent)
+            for directory in reversed(missing_dirs):
+                os.mkdir(directory)
+                created_dirs.append(directory)
+            created.append(target)
+            shutil.copy2(source, target)
+    except OSError:
+        for target in reversed(created):
+            try:
+                os.remove(target)
+            except OSError:
+                pass
+        for directory in reversed(created_dirs):
+            try:
+                os.rmdir(directory)
+            except OSError:
+                pass
+        raise
+    return len(planned)
 
 # =========================================================================
 # AutoTranslatorConfig.ini  (minimal -> XUnity expande no primeiro run)
@@ -1024,31 +1100,38 @@ MINIMAL_AT_INI = (
 )
 
 def _set_ini(content, section, key, value):
-    lines = content.split('\n')
-    out = []
-    in_sec = False
-    done = False
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith('[') and stripped.endswith(']'):
-            in_sec = (stripped == '[' + section + ']')
-            out.append(line)
-            continue
-        if in_sec and not done and '=' in stripped and stripped.split('=', 1)[0].strip() == key:
-            out.append('{}={}'.format(key, value))
-            done = True
-            continue
-        out.append(line)
-    content = '\n'.join(out)
-    if not done:
-        content = content.rstrip() + '\n\n[' + section + ']\n' + '{}{}'.format(key, '=' + value + '\n')
-    return content
+    lines = content.splitlines()
+    start = None
+    end = len(lines)
+    for index, line in enumerate(lines):
+        heading = line.strip()
+        if heading.startswith('[') and heading.endswith(']'):
+            if start is not None:
+                end = index
+                break
+            if heading[1:-1].casefold() == section.casefold():
+                start = index
+    if start is None:
+        lines.extend(['', '[{}]'.format(section), '{}={}'.format(key, value)])
+    else:
+        for index in range(start + 1, end):
+            current = lines[index].strip()
+            if '=' in current and current.split('=', 1)[0].strip().casefold() == key.casefold():
+                lines[index] = '{}={}'.format(key, value)
+                break
+        else:
+            lines.insert(end, '{}={}'.format(key, value))
+    return '\n'.join(lines).rstrip() + '\n'
 
 def patch_autotranslator_ini(src, tgt):
     cfg_dir = os.path.join(GAME_DIR, 'BepInEx', 'config')
     os.makedirs(cfg_dir, exist_ok=True)
     ini = os.path.join(cfg_dir, 'AutoTranslatorConfig.ini')
-    content = MINIMAL_AT_INI if not os.path.exists(ini) else open(ini, 'r', encoding='utf-8').read()
+    original = MINIMAL_AT_INI
+    if os.path.isfile(ini):
+        with open(ini, 'r', encoding='utf-8-sig') as file:
+            original = file.read()
+    content = original
     content = _set_ini(content, 'General', 'Language', _config_code(_argos_code(tgt)))
     content = _set_ini(content, 'General', 'FromLanguage', _config_code(_argos_code(src)))
     content = _set_ini(content, 'Service', 'Endpoint', 'CustomTranslate')
@@ -1061,8 +1144,16 @@ def patch_autotranslator_ini(src, tgt):
     flow.append(_argos_code(tgt))
     output = r'Translation\SFTranslator\{}\Text\_AutoGeneratedTranslations.txt'.format('_'.join(flow))
     content = _set_ini(content, 'Files', 'OutputFile', output)
-    with open(ini, 'w', encoding='utf-8') as f:
-        f.write(content)
+    if content != original or not os.path.isfile(ini):
+        if os.path.isfile(ini):
+            backup_dir = os.path.join(UAT_DIR, 'Backups')
+            os.makedirs(backup_dir, exist_ok=True)
+            digest = hashlib.sha256(original.encode('utf-8')).hexdigest()[:16]
+            backup = os.path.join(backup_dir, 'AutoTranslatorConfig-{}.ini'.format(digest))
+            if not os.path.exists(backup):
+                shutil.copy2(ini, backup)
+        with open(ini, 'w', encoding='utf-8') as f:
+            f.write(content)
     return ini
 
 def write_start_bat():
@@ -1113,54 +1204,82 @@ def install_bepinex_xunity(runtime=None, architecture=None, on_step=None):
     if not manifest:
         raise RuntimeError('sem modulo para {} {}'.format(runtime, architecture))
     status = installation_status(info)
+    if status['bepinex_present'] and not status['bepinex']:
+        raise RuntimeError('BepInEx ja existe, mas o core esta incompleto ou ambiguo. '
+                           'O instalador nao vai substituir os arquivos existentes.')
     if status['bepinex'] and not status['runtime_match']:
         raise RuntimeError('BepInEx {} ja instalado, mas o jogo foi detectado como {}. '
                            'Remova/repare conscientemente antes de continuar.'.format(
                                status['bepinex_runtime'], runtime))
+    if status['bepinex'] and status['bepinex_generation'] != (5 if runtime == 'Mono' else 6):
+        raise RuntimeError('BepInEx {} encontrado, mas o XUnity empacotado requer BepInEx {}. '
+                           'A instalacao existente foi preservada.'.format(
+                               status['bepinex_generation'], 5 if runtime == 'Mono' else 6))
+    if status['bepinex']:
+        proxy = os.path.join(GAME_DIR, 'winhttp.dll')
+        proxy_architecture = _pe_arch(proxy) if os.path.isfile(proxy) else 'Unknown'
+        if proxy_architecture in ('x86', 'x64') and proxy_architecture != architecture:
+            raise RuntimeError('BepInEx existente usa proxy {} mas o jogo foi detectado como {}. '
+                               'Arquivos preservados.'.format(proxy_architecture, architecture))
+    if status['xunity_present'] and not status['xunity']:
+        raise RuntimeError('XUnity AutoTranslator ja existe, mas esta incompleto ou ambiguo. '
+                           'O instalador nao vai substituir o plugin existente.')
+    if status['xunity'] and status['xunity_runtime'] != runtime:
+        raise RuntimeError('XUnity {} ja instalado para jogo {}. '
+                           'O plugin existente foi preservado.'.format(status['xunity_runtime'], runtime))
     if on_step:
         on_step(1, 'Jogo detectado: {} {}'.format(runtime, architecture))
     bep_label, bep_url, bep_hash = manifest['bepinex']
     xu_label, xu_url, xu_hash = manifest['xunity']
     bep_zip = os.path.join(CACHE_ZIP_DIR, os.path.basename(bep_url))
     xu_zip = os.path.join(CACHE_ZIP_DIR, os.path.basename(xu_url))
+    missing_bepinex = not status['bepinex']
+    missing_xunity = not status['xunity']
+    if missing_bepinex:
+        if on_step:
+            on_step(2, 'Baixando BepInEx...')
+        download_file(bep_url, bep_zip, bep_label, bep_hash)
+    else:
+        print('[INFO] BepInEx existente preservado; nenhuma DLL do core sera substituida.', flush=True)
+    if missing_xunity:
+        if on_step:
+            on_step(3, 'Baixando XUnity AutoTranslator...')
+        download_file(xu_url, xu_zip, xu_label, xu_hash)
+    else:
+        print('[INFO] XUnity existente preservado; plugin nao sera reinstalado.', flush=True)
     if on_step:
-        on_step(2, 'Baixando BepInEx...')
-    download_file(bep_url, bep_zip, bep_label, bep_hash)
-    if on_step:
-        on_step(3, 'Baixando XUnity AutoTranslator...')
-    download_file(xu_url, xu_zip, xu_label, xu_hash)
-    if on_step:
-        on_step(4, 'Validando e instalando no jogo...')
-    stage = tempfile.mkdtemp(prefix='uat-install-', dir=CACHE_ZIP_DIR)
+        on_step(4, 'Validando e instalando somente arquivos ausentes...')
+    stage = tempfile.mkdtemp(prefix='uat-install-', dir=CACHE_ZIP_DIR) if (missing_bepinex or missing_xunity) else None
     try:
-        bep_stage = os.path.join(stage, 'bepinex')
-        xu_stage = os.path.join(stage, 'xunity')
-        os.makedirs(bep_stage)
-        os.makedirs(xu_stage)
-        _extract_safe(bep_zip, bep_stage)
-        _extract_safe(xu_zip, xu_stage)
-        ini_path = os.path.join(GAME_DIR, 'BepInEx', 'config', 'AutoTranslatorConfig.ini')
-        if os.path.isfile(ini_path):
-            backup_dir = os.path.join(UAT_DIR, 'Backups')
-            os.makedirs(backup_dir, exist_ok=True)
-            shutil.copy2(ini_path, os.path.join(
-                backup_dir, 'AutoTranslatorConfig-{}.ini'.format(time.strftime('%Y%m%d-%H%M%S'))))
-        _merge_tree(bep_stage, GAME_DIR)
-        _merge_tree(xu_stage, GAME_DIR)
+        stages = []
+        if missing_bepinex:
+            bep_stage = os.path.join(stage, 'bepinex')
+            os.makedirs(bep_stage)
+            _extract_safe(bep_zip, bep_stage)
+            stages.append(bep_stage)
+        if missing_xunity:
+            xu_stage = os.path.join(stage, 'xunity')
+            os.makedirs(xu_stage)
+            _extract_safe(xu_zip, xu_stage)
+            stages.append(xu_stage)
+        copied = _copy_missing_only(stages, GAME_DIR)
+        print('[INFO] {} arquivo(s) novo(s) copiado(s); existentes preservados.'.format(copied), flush=True)
     finally:
-        shutil.rmtree(stage, ignore_errors=True)
+        if stage:
+            shutil.rmtree(stage, ignore_errors=True)
     cfg = load_config()
     cfg['installation'] = {
         'runtime': runtime,
         'architecture': architecture,
-        'bepinex': bep_label,
-        'xunity': xu_label,
+        'bepinex': bep_label if missing_bepinex else 'existente preservado',
+        'xunity': xu_label if missing_xunity else 'existente preservado',
         'installed_at': time.strftime('%Y-%m-%dT%H:%M:%S'),
     }
     save_config(cfg)
     ini = patch_autotranslator_ini(cfg.get('source_language', 'en'), cfg.get('target_language', 'pt-BR'))
     _log('AutoTranslatorConfig.ini: {}'.format(ini))
-    write_start_bat()
+    if not os.path.exists(os.path.join(GAME_DIR, 'start_translation.bat')):
+        write_start_bat()
     final_status = installation_status(info)
     if not final_status['bepinex'] or not final_status['xunity']:
         raise RuntimeError('arquivos extraidos, mas a validacao BepInEx/XUnity falhou')
@@ -1788,7 +1907,11 @@ def main():
     if command in ('__install__', 'install', 'instalar', 'repair', 'reparar'):
         rt = args[1] if len(args) > 1 else None
         arch = args[2] if len(args) > 2 else None
-        install_bepinex_xunity(runtime=rt, architecture=arch)
+        try:
+            install_bepinex_xunity(runtime=rt, architecture=arch)
+        except RuntimeError as error:
+            print('[ERRO] Instalacao Unity interrompida: {}'.format(error), file=sys.stderr, flush=True)
+            raise SystemExit(1)
         return
     if command in ('config', 'configure', 'idiomas', 'languages'):
         if not detect_game()['valid']:

@@ -15,20 +15,41 @@ use crate::{
 
 pub(super) struct Unity;
 
-fn directory_contains(root: &Path, needle: &str) -> bool {
-    let Ok(entries) = fs::read_dir(root) else {
-        return false;
+fn installed_integration(root: &Path, runtime: &str) -> (bool, String) {
+    let core = root.join("BepInEx/core");
+    let xunity = root.join("BepInEx/plugins/XUnity.AutoTranslator");
+    let mono5 = core.join("BepInEx.dll").is_file();
+    let mono6 = core.join("BepInEx.Unity.Mono.dll").is_file();
+    let il2cpp = core.join("BepInEx.Unity.IL2CPP.dll").is_file();
+    let xunity_core = xunity.join("XUnity.AutoTranslator.Plugin.Core.dll").is_file()
+        && xunity.join("Translators/CustomTranslate.dll").is_file()
+        && core.join("XUnity.Common.dll").is_file();
+    let xunity_mono = xunity.join("XUnity.AutoTranslator.Plugin.BepInEx.dll").is_file();
+    let xunity_il2cpp = xunity.join("XUnity.AutoTranslator.Plugin.BepInEx-IL2CPP.dll").is_file();
+    let redirector = root.join("BepInEx/plugins/XUnity.ResourceRedirector");
+    let compatible = match runtime {
+        "Mono" => mono5 && !mono6 && !il2cpp && xunity_core && xunity_mono && !xunity_il2cpp
+            && redirector.join("XUnity.ResourceRedirector.BepInEx.dll").is_file(),
+        "IL2CPP" => il2cpp && !mono5 && !mono6 && xunity_core && xunity_il2cpp && !xunity_mono
+            && redirector.join("XUnity.ResourceRedirector.BepInEx-IL2CPP.dll").is_file(),
+        _ => false,
     };
-    entries.flatten().any(|entry| {
-        let path = entry.path();
-        if path.is_dir() {
-            directory_contains(&path, needle)
-        } else {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.to_ascii_lowercase().contains(needle))
-        }
-    })
+    if compatible {
+        return (true, format!("BepInEx/XUnity {runtime} encontrado; arquivos existentes serão preservados"));
+    }
+    if mono6 && runtime == "Mono" {
+        return (false, "BepInEx 6 Mono detectado; pacote XUnity atual requer BepInEx 5. Instalação automática bloqueada".into());
+    }
+    if (il2cpp && runtime == "Mono") || ((mono5 || mono6) && runtime == "IL2CPP") {
+        return (false, format!("BepInEx existente incompatível com o runtime {runtime}; instalação automática bloqueada"));
+    }
+    if mono5 || mono6 || il2cpp {
+        return (false, format!("BepInEx existente detectado; XUnity {runtime} será verificado sem substituir o core"));
+    }
+    if root.join("BepInEx").exists() {
+        return (false, "BepInEx parcial detectado; instalação automática será bloqueada até revisão".into());
+    }
+    (false, format!("BepInEx/XUnity {runtime} será instalado ao iniciar"))
 }
 
 impl EngineAdapter for Unity {
@@ -76,18 +97,8 @@ impl EngineAdapter for Unity {
     fn integration_state(&self, game: &Game) -> (bool, String) {
         let executable = native_game_path(Path::new(&game.executable_path));
         let root = executable.parent().unwrap_or(Path::new("."));
-        let bep_in_ex = root.join("BepInEx");
-        let ready = bep_in_ex.join("core").is_dir()
-            && directory_contains(&bep_in_ex.join("plugins"), "autotranslator");
         let runtime = game.runtime.as_deref().unwrap_or("");
-        if ready {
-            (true, format!("BepInEx/XUnity {runtime} instalado no jogo"))
-        } else {
-            (
-                false,
-                format!("BepInEx/XUnity {runtime} será instalado ao iniciar"),
-            )
-        }
+        installed_integration(root, runtime)
     }
 
     fn cache_directory(&self, game: &Game) -> Result<PathBuf, String> {
@@ -149,12 +160,12 @@ impl EngineAdapter for Unity {
                 .env("UAT_STATE_DIR", game_root.join("uat-unity"))
                 .env("UAT_MODELS_DIR", &universal_models)
                 .env("PYTHONIOENCODING", "utf-8");
-            run_stage(install, app, "Instalando BepInEx e XUnity dentro do jogo")?;
+            run_stage(install, app, "Verificando e instalando componentes Unity ausentes")?;
         } else {
             session_log(
                 app,
                 "system",
-                "BepInEx e XUnity já estão instalados e compatíveis.",
+                "BepInEx e XUnity compatíveis encontrados; arquivos existentes preservados.",
             );
         }
 
@@ -207,5 +218,31 @@ impl EngineAdapter for Unity {
 
     fn runtime_ready(&self, runtimes: &Path) -> bool {
         runtimes.join("unity/lt.exe").is_file()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn existing_core_without_xunity_is_not_ready() {
+        let root = std::env::temp_dir().join(format!("sftranslator-unity-install-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(root.join("BepInEx/core")).unwrap();
+        fs::write(root.join("BepInEx/core/BepInEx.dll"), b"existing").unwrap();
+        let (ready, detail) = installed_integration(&root, "Mono");
+        assert!(!ready);
+        assert!(detail.contains("preservado") || detail.contains("sem substituir"));
+        fs::create_dir_all(root.join("BepInEx/plugins/XUnity.AutoTranslator")).unwrap();
+        fs::write(root.join("BepInEx/core/XUnity.Common.dll"), b"existing").unwrap();
+        fs::write(root.join("BepInEx/plugins/XUnity.AutoTranslator/XUnity.AutoTranslator.Plugin.Core.dll"), b"existing").unwrap();
+        fs::write(root.join("BepInEx/plugins/XUnity.AutoTranslator/XUnity.AutoTranslator.Plugin.BepInEx.dll"), b"existing").unwrap();
+        fs::create_dir_all(root.join("BepInEx/plugins/XUnity.AutoTranslator/Translators")).unwrap();
+        fs::write(root.join("BepInEx/plugins/XUnity.AutoTranslator/Translators/CustomTranslate.dll"), b"existing").unwrap();
+        fs::create_dir_all(root.join("BepInEx/plugins/XUnity.ResourceRedirector")).unwrap();
+        fs::write(root.join("BepInEx/plugins/XUnity.ResourceRedirector/XUnity.ResourceRedirector.BepInEx.dll"), b"existing").unwrap();
+        assert!(installed_integration(&root, "Mono").0);
+        assert!(!installed_integration(&root, "IL2CPP").0);
+        fs::remove_dir_all(root).unwrap();
     }
 }

@@ -73,6 +73,151 @@ class DetectionTests(unittest.TestCase):
 
 
 class SafetyTests(unittest.TestCase):
+    def test_existing_bepinex_is_preserved_when_only_xunity_is_missing(self):
+        old_game_dir, old_state, old_config, old_cache = uat.GAME_DIR, uat.UAT_DIR, uat.CONFIG_PATH, uat.CACHE_ZIP_DIR
+        try:
+            with tempfile.TemporaryDirectory() as temp:
+                game, state = os.path.join(temp, 'game'), os.path.join(temp, 'state')
+                os.makedirs(game)
+                os.makedirs(state)
+                uat.GAME_DIR, uat.UAT_DIR = game, state
+                uat.CONFIG_PATH = os.path.join(state, 'unity_uat_config.json')
+                uat.CACHE_ZIP_DIR = os.path.join(state, '_cache_downloads')
+                os.makedirs(uat.CACHE_ZIP_DIR)
+                write_pe(os.path.join(game, 'Sample.exe'), 0x8664)
+                managed = os.path.join(game, 'Sample_Data', 'Managed')
+                os.makedirs(managed)
+                open(os.path.join(managed, 'Assembly-CSharp.dll'), 'wb').close()
+                core = os.path.join(game, 'BepInEx', 'core')
+                os.makedirs(core)
+                existing = os.path.join(core, 'BepInEx.dll')
+                with open(existing, 'wb') as file:
+                    file.write(b'preinstalled-mod-loader')
+                requested = []
+
+                def fake_download(url, destination, *_args):
+                    requested.append(os.path.basename(url))
+                    with zipfile.ZipFile(destination, 'w') as archive:
+                        archive.writestr('BepInEx/core/XUnity.Common.dll', b'xunity-common')
+                        archive.writestr('BepInEx/plugins/XUnity.AutoTranslator/XUnity.AutoTranslator.Plugin.Core.dll', b'plugin-core')
+                        archive.writestr('BepInEx/plugins/XUnity.AutoTranslator/XUnity.AutoTranslator.Plugin.BepInEx.dll', b'plugin-mono')
+                        archive.writestr('BepInEx/plugins/XUnity.AutoTranslator/Translators/CustomTranslate.dll', b'custom')
+                        archive.writestr('BepInEx/plugins/XUnity.ResourceRedirector/XUnity.ResourceRedirector.BepInEx.dll', b'redirector')
+                    return destination
+
+                with patch.object(uat, 'download_file', side_effect=fake_download):
+                    self.assertTrue(uat.install_bepinex_xunity())
+                self.assertEqual(len(requested), 1)
+                self.assertIn('AutoTranslator', requested[0])
+                with open(existing, 'rb') as file:
+                    self.assertEqual(file.read(), b'preinstalled-mod-loader')
+                self.assertEqual(uat.installation_status()['xunity_runtime'], 'Mono')
+        finally:
+            uat.GAME_DIR, uat.UAT_DIR, uat.CONFIG_PATH, uat.CACHE_ZIP_DIR = old_game_dir, old_state, old_config, old_cache
+
+    def test_partial_bepinex_is_not_overwritten(self):
+        old_game_dir = uat.GAME_DIR
+        try:
+            with tempfile.TemporaryDirectory() as game:
+                uat.GAME_DIR = game
+                write_pe(os.path.join(game, 'Sample.exe'), 0x8664)
+                managed = os.path.join(game, 'Sample_Data', 'Managed')
+                os.makedirs(managed)
+                open(os.path.join(managed, 'Assembly-CSharp.dll'), 'wb').close()
+                os.makedirs(os.path.join(game, 'BepInEx', 'core'))
+                with patch.object(uat, 'download_file') as download:
+                    with self.assertRaisesRegex(RuntimeError, 'incompleto'):
+                        uat.install_bepinex_xunity()
+                    download.assert_not_called()
+        finally:
+            uat.GAME_DIR = old_game_dir
+
+    def test_existing_wrong_xunity_variant_is_not_replaced(self):
+        old_game_dir = uat.GAME_DIR
+        try:
+            with tempfile.TemporaryDirectory() as game:
+                uat.GAME_DIR = game
+                write_pe(os.path.join(game, 'Sample.exe'), 0x8664)
+                managed = os.path.join(game, 'Sample_Data', 'Managed')
+                os.makedirs(managed)
+                open(os.path.join(managed, 'Assembly-CSharp.dll'), 'wb').close()
+                core = os.path.join(game, 'BepInEx', 'core')
+                plugin = os.path.join(game, 'BepInEx', 'plugins', 'XUnity.AutoTranslator')
+                redirector = os.path.join(game, 'BepInEx', 'plugins', 'XUnity.ResourceRedirector')
+                os.makedirs(core)
+                os.makedirs(plugin)
+                os.makedirs(redirector)
+                for path in (os.path.join(core, 'BepInEx.dll'), os.path.join(core, 'XUnity.Common.dll'),
+                             os.path.join(plugin, 'XUnity.AutoTranslator.Plugin.Core.dll'),
+                             os.path.join(plugin, 'XUnity.AutoTranslator.Plugin.BepInEx-IL2CPP.dll'),
+                             os.path.join(plugin, 'Translators', 'CustomTranslate.dll'),
+                             os.path.join(redirector, 'XUnity.ResourceRedirector.BepInEx-IL2CPP.dll')):
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                    with open(path, 'wb') as file:
+                        file.write(b'existing')
+                with patch.object(uat, 'download_file') as download:
+                    with self.assertRaisesRegex(RuntimeError, 'XUnity IL2CPP'):
+                        uat.install_bepinex_xunity()
+                    download.assert_not_called()
+        finally:
+            uat.GAME_DIR = old_game_dir
+
+    def test_existing_bepinex_six_mono_is_not_treated_as_compatible_five(self):
+        old_game_dir = uat.GAME_DIR
+        try:
+            with tempfile.TemporaryDirectory() as game:
+                uat.GAME_DIR = game
+                write_pe(os.path.join(game, 'Sample.exe'), 0x8664)
+                managed = os.path.join(game, 'Sample_Data', 'Managed')
+                os.makedirs(managed)
+                open(os.path.join(managed, 'Assembly-CSharp.dll'), 'wb').close()
+                core = os.path.join(game, 'BepInEx', 'core')
+                os.makedirs(core)
+                open(os.path.join(core, 'BepInEx.Unity.Mono.dll'), 'wb').close()
+                with patch.object(uat, 'download_file') as download:
+                    with self.assertRaisesRegex(RuntimeError, 'requer BepInEx 5'):
+                        uat.install_bepinex_xunity()
+                    download.assert_not_called()
+        finally:
+            uat.GAME_DIR = old_game_dir
+
+    def test_preflight_rejects_conflict_without_writing_other_files(self):
+        with tempfile.TemporaryDirectory() as temp:
+            stage, game = os.path.join(temp, 'stage'), os.path.join(temp, 'game')
+            os.makedirs(os.path.join(stage, 'BepInEx', 'core'))
+            os.makedirs(os.path.join(game, 'BepInEx', 'core'))
+            existing = os.path.join(game, 'BepInEx', 'core', 'XUnity.Common.dll')
+            with open(existing, 'wb') as file:
+                file.write(b'other-version')
+            with open(os.path.join(stage, 'BepInEx', 'core', 'XUnity.Common.dll'), 'wb') as file:
+                file.write(b'new-version')
+            with open(os.path.join(stage, 'new-file.txt'), 'wb') as file:
+                file.write(b'new')
+            with self.assertRaisesRegex(RuntimeError, 'existente diferente'):
+                uat._copy_missing_only([stage], game)
+            self.assertFalse(os.path.exists(os.path.join(game, 'new-file.txt')))
+            with open(existing, 'rb') as file:
+                self.assertEqual(file.read(), b'other-version')
+
+    def test_failed_copy_removes_only_new_files_and_directories(self):
+        with tempfile.TemporaryDirectory() as temp:
+            stage, game = os.path.join(temp, 'stage'), os.path.join(temp, 'game')
+            os.makedirs(os.path.join(stage, 'BepInEx', 'plugins'))
+            os.makedirs(game)
+            source = os.path.join(stage, 'BepInEx', 'plugins', 'plugin.dll')
+            with open(source, 'wb') as file:
+                file.write(b'new')
+
+            def fail_after_create(_source, target):
+                with open(target, 'wb') as file:
+                    file.write(b'partial')
+                raise OSError('disk full')
+
+            with patch.object(uat.shutil, 'copy2', side_effect=fail_after_create):
+                with self.assertRaisesRegex(OSError, 'disk full'):
+                    uat._copy_missing_only([stage], game)
+            self.assertFalse(os.path.exists(os.path.join(game, 'BepInEx')))
+
     def test_numbered_language_selector_and_cancel(self):
         options = [('en', 'English'), ('pb', 'Portugues (Brasil)')]
         with patch('builtins.input', return_value='2'):
@@ -138,6 +283,36 @@ class SafetyTests(unittest.TestCase):
         changed = uat._set_ini(original, 'General', 'Language', 'pt-BR')
         self.assertIn('Language=pt-BR', changed)
         self.assertNotIn('Language=en', changed)
+
+    def test_ini_adds_missing_key_inside_existing_section(self):
+        original = '[General]\nLanguage=en\n[Service]\nEndpoint=GoogleTranslate\n'
+        changed = uat._set_ini(original, 'General', 'FromLanguage', 'ja')
+        self.assertEqual(changed.count('[General]'), 1)
+        self.assertLess(changed.index('FromLanguage=ja'), changed.index('[Service]'))
+
+    def test_existing_xunity_config_is_backed_up_before_edit(self):
+        old_game_dir, old_state = uat.GAME_DIR, uat.UAT_DIR
+        try:
+            with tempfile.TemporaryDirectory() as temp:
+                uat.GAME_DIR = os.path.join(temp, 'game')
+                uat.UAT_DIR = os.path.join(temp, 'state')
+                config = os.path.join(uat.GAME_DIR, 'BepInEx', 'config')
+                os.makedirs(config)
+                ini = os.path.join(config, 'AutoTranslatorConfig.ini')
+                original = '[General]\nLanguage=en\n[Service]\nEndpoint=GoogleTranslate\n'
+                with open(ini, 'w', encoding='utf-8') as file:
+                    file.write(original)
+                uat.patch_autotranslator_ini('ja', 'pb')
+                backups = os.listdir(os.path.join(uat.UAT_DIR, 'Backups'))
+                self.assertEqual(len(backups), 1)
+                with open(os.path.join(uat.UAT_DIR, 'Backups', backups[0]), encoding='utf-8') as file:
+                    self.assertEqual(file.read(), original)
+                with open(ini, encoding='utf-8') as file:
+                    updated = file.read()
+                self.assertEqual(updated.count('[General]'), 1)
+                self.assertIn('FromLanguage=ja', updated)
+        finally:
+            uat.GAME_DIR, uat.UAT_DIR = old_game_dir, old_state
 
     @unittest.skipUnless(os.name == 'nt', 'junction de compatibilidade exclusiva do Windows')
     def test_unicode_model_path_gets_ascii_alias(self):
@@ -280,7 +455,7 @@ class SafetyTests(unittest.TestCase):
                      'defina UAT_LIVE_TEST=1 para testar os ZIPs oficiais')
 class LiveInstallTests(unittest.TestCase):
     def test_official_mono_and_il2cpp_packages(self):
-        old_game_dir = uat.GAME_DIR
+        old_game_dir, old_state, old_config, old_cache = uat.GAME_DIR, uat.UAT_DIR, uat.CONFIG_PATH, uat.CACHE_ZIP_DIR
         try:
             variants = (
                 ('Mono', 'x64', 0x8664), ('Mono', 'x86', 0x014C),
@@ -289,6 +464,10 @@ class LiveInstallTests(unittest.TestCase):
             for runtime, architecture, machine in variants:
                 with self.subTest(runtime=runtime, architecture=architecture), tempfile.TemporaryDirectory() as game:
                     uat.GAME_DIR = game
+                    uat.UAT_DIR = os.path.join(game, 'sftranslator-state')
+                    uat.CONFIG_PATH = os.path.join(uat.UAT_DIR, 'unity_uat_config.json')
+                    uat.CACHE_ZIP_DIR = os.path.join(uat.UAT_DIR, '_cache_downloads')
+                    os.makedirs(uat.CACHE_ZIP_DIR)
                     write_pe(os.path.join(game, 'Sample.exe'), machine)
                     data_dir = os.path.join(game, 'Sample_Data')
                     os.makedirs(data_dir)
@@ -307,7 +486,7 @@ class LiveInstallTests(unittest.TestCase):
                     self.assertTrue(status['xunity'])
                     self.assertTrue(status['runtime_match'])
         finally:
-            uat.GAME_DIR = old_game_dir
+            uat.GAME_DIR, uat.UAT_DIR, uat.CONFIG_PATH, uat.CACHE_ZIP_DIR = old_game_dir, old_state, old_config, old_cache
 
 
 if __name__ == '__main__':

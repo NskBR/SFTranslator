@@ -42,7 +42,7 @@ Os diretórios `_internal` contêm Python e bibliotecas nativas; nunca distribua
 
 Modelos são compartilhados em `app_data_dir()/models`, para o identificador `com.uat.desktop`. Na primeira utilização, modelos da antiga pasta `engines/uat-renpy/models` são copiados quando o checkout está disponível. Configurações e logs específicos ficam nas pastas de integração do jogo. Os servidores não gravam na instalação do aplicativo.
 
-O catálogo Argos é incorporado ao Rust. Modelos de tradução são baixados pelo SFTranslator conforme os pares escolhidos. Unity baixa BepInEx/XUnity conforme Mono/IL2CPP e arquitetura. Ren'Py recebe hooks já incluídos. Não ocorre instalação de Python ou LibreTranslate no computador do usuário.
+O catálogo Argos é incorporado ao Rust. Modelos de tradução são baixados pelo SFTranslator conforme os pares escolhidos. Unity identifica BepInEx e XUnity separadamente conforme Mono/IL2CPP e arquitetura: se o core BepInEx compatível já existir, ele é preservado e apenas o XUnity ausente é instalado. Instalações parciais, variantes incompatíveis e arquivos preexistentes diferentes bloqueiam a instalação automática com diagnóstico no console; nenhum arquivo de mod existente é substituído. O `AutoTranslatorConfig.ini` original recebe uma cópia em `uat-unity/Backups` antes de ser alterado. Ren'Py recebe hooks já incluídos. Não ocorre instalação de Python ou LibreTranslate no computador do usuário.
 
 ## Verificação
 
