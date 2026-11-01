@@ -7,7 +7,7 @@ export interface Game {
   engine: Engine;
   runtime?: string;
   architecture?: string;
-  status: "Novo" | "Pronto" | "Atenção" | "Instalação pendente" | "Modelo necessário" | "Em desenvolvimento";
+  status: "Novo" | "Pronto" | "Atenção" | "Instalação pendente" | "Modelo necessário" | "Em desenvolvimento" | "Em teste";
   sourceLanguage: string;
   targetLanguage: string;
   addedAt: string;
@@ -23,6 +23,7 @@ export interface Game {
 
 export interface AppSettings {
   enableExperimentalChainedFlow: boolean;
+  theme: "amber" | "ocean" | "violet" | "forest";
 }
 
 export interface EngineHealth {

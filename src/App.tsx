@@ -7,17 +7,19 @@ import "country-flag-icons/3x2/flags.css";
 import logo from "./assets/sftranslator-logo-v2.png";
 import {
   Activity, Box, ChevronLeft, ChevronRight, CircleHelp, Download, Gamepad2,
-  ChevronDown, Languages, LayoutGrid, Library, List, Maximize2, Minus, Play, Plus, Search,
+  ChevronDown, LayoutGrid, Library, List, Maximize2, Minus, Play, Plus, Search,
   Settings, Trash2, Wrench, X, Pencil, Terminal, Square
 } from "lucide-react";
 import type { AppSettings, EngineHealth, Game, TranslationModel } from "./types";
 import type { DownloadTask, SessionLine } from "./types";
 import { DeleteGameModal } from "./components/Common";
+import { AboutModal } from "./components/AboutModal";
 import { UpdateModal, UpdateSettingsRow, useUpdater } from "./components/Updater";
-import { LibraryPage } from "./pages/LibraryPage";
+import { LibraryPage, type LibrarySort, type LibraryView } from "./pages/LibraryPage";
 import { GameDetails, Wizard } from "./pages/GameConfig";
 import { Models } from "./pages/Models";
-import { Diagnostics, DownloadsPage, EmptyPage, SessionPage, SettingsPage } from "./pages/UtilityPages";
+import { Diagnostics, DownloadsPage, EmptyPage, SessionPage } from "./pages/UtilityPages";
+import { SettingsPage } from "./pages/Settings";
 import { isTestOnlyGame } from "./engines";
 
 const navigation = [
@@ -33,12 +35,39 @@ const MAX_SIDEBAR_WIDTH = 260;
 function App() {
   const updater = useUpdater();
   const [page, setPage] = useState("Biblioteca");
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const aboutButtonRef = useRef<HTMLButtonElement>(null);
   const [games, setGames] = useState<Game[]>([]);
   const [health, setHealth] = useState<EngineHealth[]>([]);
   const [models, setModels] = useState<TranslationModel[]>([]);
-  const [settings, setSettings] = useState<AppSettings>({ enableExperimentalChainedFlow: false });
+  const [settings, setSettings] = useState<AppSettings>(() => {
+    try {
+      const cached = localStorage.getItem("sftranslator_theme");
+      const theme = cached === "ocean" || cached === "violet" || cached === "forest" ? cached : "amber";
+      return { enableExperimentalChainedFlow: false, theme };
+    } catch { return { enableExperimentalChainedFlow: false, theme: "amber" }; }
+  });
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("Todos");
+  const [libraryView, setLibraryView] = useState<LibraryView>(() => {
+    try { return localStorage.getItem("sftranslator_library_view") === "grid" ? "grid" : "list"; }
+    catch { return "list"; }
+  });
+  const changeLibraryView = (next: LibraryView) => {
+    setLibraryView(next);
+    try { localStorage.setItem("sftranslator_library_view", next); } catch { /* noop */ }
+  };
+  const [librarySort, setLibrarySort] = useState<LibrarySort>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("sftranslator_library_sort") || "null");
+      if (["lastLaunch", "addedAt", "name"].includes(saved?.key) && ["asc", "desc"].includes(saved?.direction)) return saved;
+    } catch { /* usa a ordem inicial */ }
+    return { key: "lastLaunch", direction: "desc" };
+  });
+  const changeLibrarySort = (next: LibrarySort) => {
+    setLibrarySort(next);
+    try { localStorage.setItem("sftranslator_library_sort", JSON.stringify(next)); } catch { /* noop */ }
+  };
   const [toast, setToast] = useState<string>();
   const [selectedGame, setSelectedGame] = useState<Game>();
   const [downloads, setDownloads] = useState<DownloadTask[]>([]);
@@ -61,6 +90,11 @@ function App() {
   const isSidebarCompact = sidebarWidth <= 90;
   const inTauri = "__TAURI_INTERNALS__" in window;
   const appWindow = inTauri ? getCurrentWindow() : undefined;
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = settings.theme;
+    try { localStorage.setItem("sftranslator_theme", settings.theme); } catch { /* noop */ }
+  }, [settings.theme]);
 
   const refresh = async () => {
     const results = await Promise.allSettled([
@@ -283,12 +317,21 @@ function App() {
   }, [page, selectedGame?.id, models]);
 
   const filtered = useMemo(() => games
-    .filter(game => (filter === "Todos" || game.engine === filter) && game.name.toLowerCase().includes(query.toLowerCase()))
+    .filter(game => (filter === "Todos" || game.engine === filter) && game.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
     .sort((left, right) => {
-      if (left.id === sessionGame?.id) return -1;
-      if (right.id === sessionGame?.id) return 1;
-      return (Date.parse(right.lastLaunch || "") || 0) - (Date.parse(left.lastLaunch || "") || 0);
-    }), [games, query, filter, sessionGame?.id]);
+      if (sessionRunning && left.id === sessionGame?.id && right.id !== sessionGame?.id) return -1;
+      if (sessionRunning && right.id === sessionGame?.id && left.id !== sessionGame?.id) return 1;
+      if (librarySort.key === "name") {
+        const compared = left.name.localeCompare(right.name, "pt-BR", { sensitivity: "base" });
+        return (librarySort.direction === "asc" ? compared : -compared) || left.id.localeCompare(right.id);
+      }
+      const leftDate = Date.parse(left[librarySort.key] || "");
+      const rightDate = Date.parse(right[librarySort.key] || "");
+      if (!Number.isFinite(leftDate)) return Number.isFinite(rightDate) ? 1 : left.id.localeCompare(right.id);
+      if (!Number.isFinite(rightDate)) return -1;
+      const compared = librarySort.direction === "desc" ? rightDate - leftDate : leftDate - rightDate;
+      return compared || left.id.localeCompare(right.id);
+    }), [games, query, filter, librarySort, sessionRunning, sessionGame?.id]);
 
   const openGameDetails = (game: Game) => {
     setSelectedGame(game);
@@ -323,13 +366,13 @@ function App() {
         <div className="sidebar-brand"><img src={logo} alt="SFTranslator"/></div>
         <nav>{navigation.map(([label, Icon],index) => <Fragment key={label}>{index===0&&<span className="nav-group-label">Biblioteca</span>}{index===2&&<span className="nav-group-label">Ferramentas</span>}<button title={isSidebarCompact ? label : undefined} className={page === label ? "active" : ""} onClick={() => setPage(label)}><Icon size={18}/><span>{label}</span>{label === "Biblioteca" && <b className="nav-count">{games.length}</b>}{label === "Console" && sessionRunning && <i className="console-live-dot" aria-label="Sessão ativa"/>}</button></Fragment>)}</nav>
         <section className="sidebar-overview"><span>VISÃO GERAL</span><div><button onClick={()=>setPage("Biblioteca")}><b>{games.length}</b><small>{games.length===1?"Jogo":"Jogos"}</small></button><button onClick={()=>setPage("Modelos")}><b>{installedModelCount}</b><small>{installedModelCount===1?"Modelo":"Modelos"}</small></button></div><p><i className={`dot ${sessionRunning?"ok":""}`}/>{sessionRunning?sessionGame&&isTestOnlyGame(sessionGame)?"Jogo aberto para teste":"Tradução em andamento":"Aplicativo pronto"}</p></section>
-        <div className="sidebar-footer"><button className={page === "Configurações" ? "active" : ""} title="Configurações" onClick={() => setPage("Configurações")}><Settings size={18}/></button><button className={page === "Sobre" ? "active" : ""} title="Sobre" onClick={() => setPage("Sobre")}><CircleHelp size={18}/></button></div>
+        <div className="sidebar-footer"><button className={page === "Configurações" ? "active" : ""} title="Configurações" onClick={() => setPage("Configurações")}><Settings size={18}/></button><button ref={aboutButtonRef} className={aboutOpen ? "active" : ""} title="Sobre" aria-label="Sobre o SFTranslator" onClick={() => setAboutOpen(true)}><CircleHelp size={18}/></button></div>
         <div className="sidebar-resizer" role="separator" aria-label="Redimensionar barra lateral" aria-orientation="vertical" onMouseDown={startSidebarResize} onDoubleClick={toggleSidebarWidth}/>
       </aside>
       <main>
         {page === "Biblioteca" && (selectedGame
           ? <GameDetails game={selectedGame} models={models} experimentalEnabled={settings.enableExperimentalChainedFlow} onBack={() => setSelectedGame(undefined)} onRemove={() => setGamePendingDeletion(selectedGame)} onSave={configureGame} onOpenCache={() => openGameCache(selectedGame)} onClearCache={() => clearGameCache(selectedGame)}/>
-          : <LibraryPage games={filtered} engineNames={health.map(item=>item.engine)} filter={filter} setFilter={setFilter} query={query} setQuery={setQuery} onAddGame={() => beginAddGame()} onSelect={setSelectedGame} onLaunch={launchGame} onStop={stopGame} onDelete={setGamePendingDeletion} activeGameId={sessionRunning ? sessionGame?.id : undefined} onConsole={() => setPage("Console")}/>)}
+          : <LibraryPage games={filtered} hasGames={games.length > 0} engineNames={health.filter(item=>item.sourceFound&&item.runtimeFound).map(item=>item.engine)} engineAvailability={Object.fromEntries(health.map(item=>[item.engine,item.sourceFound&&item.runtimeFound]))} filter={filter} setFilter={setFilter} sort={librarySort} setSort={changeLibrarySort} view={libraryView} onViewChange={changeLibraryView} query={query} setQuery={setQuery} onAddGame={() => beginAddGame()} onSelect={setSelectedGame} onLaunch={launchGame} onStop={stopGame} onDelete={setGamePendingDeletion} activeGameId={sessionRunning ? sessionGame?.id : undefined} onConsole={() => setPage("Console")}/>)}
         {page === "Adicionar jogo" && <Wizard existingGame={selectedGame} models={models} experimentalEnabled={settings.enableExperimentalChainedFlow} onSave={configureGame}/>}
         {page === "Modelos" && <Models models={models} games={games} onOpenGame={openGameDetails} onDelete={deleteModel} onDownload={downloadModel}/>} 
         {page === "Downloads" && <DownloadsPage tasks={downloads}/>} 
@@ -338,14 +381,17 @@ function App() {
         )}
         {page === "Console" && !sessionGame && <EmptyPage icon={Terminal} title="Console" text="Inicie um jogo pela biblioteca para acompanhar a instalação e a tradução. O histórico da última sessão fica disponível aqui enquanto o aplicativo estiver aberto."/>}
         {page === "Diagnósticos" && <Diagnostics health={health} onAddRpgMaker={() => beginAddGame("RPG Maker")} onAddUnreal={() => beginAddGame("Unreal")}/>}
-        {page === "Configurações" && <SettingsPage settings={settings} onChange={updateSettings} updates={<UpdateSettingsRow updater={updater}/>}/>}
-        {page === "Sobre" && <EmptyPage icon={Languages} title="SFTranslator" text="Uma biblioteca de tradução local para jogos compatíveis com os motores instalados."/>}
+        {page === "Configurações" && <SettingsPage settings={settings} onChange={updateSettings} updates={<UpdateSettingsRow updater={updater}/>} onError={setToast}/>}
         <footer className="context-bar"><span><Activity size={14}/>{contextText}</span><b>{sessionRunning ? "Sessão ativa" : "Pronto"}</b></footer>
       </main>
     </div>
     {gamePendingDeletion && (
       <DeleteGameModal game={gamePendingDeletion} onCancel={() => setGamePendingDeletion(undefined)} onConfirm={() => { const game = gamePendingDeletion; setGamePendingDeletion(undefined); removeGame(game); }}/>
     )}
+    {aboutOpen && <AboutModal
+      version={updater.version}
+      onClose={() => { setAboutOpen(false); aboutButtonRef.current?.focus(); }}
+    />}
     <UpdateModal updater={updater} gameRunning={sessionRunning}/>
     {toast && <div className="toast" onClick={() => setToast(undefined)}>{toast}<X size={15}/></div>}
   </div>;

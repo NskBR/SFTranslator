@@ -49,11 +49,15 @@ fn default_flow_mode() -> String { "direct".into() }
 struct AppSettings {
     #[serde(default)]
     enable_experimental_chained_flow: bool,
+    #[serde(default = "default_theme")]
+    theme: String,
 }
+
+fn default_theme() -> String { "amber".into() }
 
 impl Default for AppSettings {
     fn default() -> Self {
-        Self { enable_experimental_chained_flow: false }
+        Self { enable_experimental_chained_flow: false, theme: default_theme() }
     }
 }
 
@@ -480,8 +484,55 @@ fn get_settings(app: AppHandle) -> Result<AppSettings, String> { load_settings(&
 
 #[tauri::command]
 fn update_settings(app: AppHandle, settings: AppSettings) -> Result<AppSettings, String> {
+    if !matches!(settings.theme.as_str(), "amber" | "ocean" | "violet" | "forest") {
+        return Err("Tema desconhecido.".into());
+    }
     save_settings(&app, &settings)?;
     Ok(settings)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StoragePaths { data: String, models: String }
+
+#[tauri::command]
+fn storage_paths(app: AppHandle) -> Result<StoragePaths, String> {
+    let data = app.path().app_data_dir().map_err(|error| error.to_string())?;
+    let models = models_directory(&app)?;
+    Ok(StoragePaths {
+        data: data.to_string_lossy().into_owned(),
+        models: models.to_string_lossy().into_owned(),
+    })
+}
+
+#[tauri::command]
+fn open_storage_folder(app: AppHandle, kind: String) -> Result<(), String> {
+    let directory = match kind.as_str() {
+        "data" => app.path().app_data_dir().map_err(|error| error.to_string())?,
+        "models" => models_directory(&app)?,
+        _ => return Err("Pasta desconhecida.".into()),
+    };
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    #[cfg(windows)]
+    Command::new("explorer.exe")
+        .arg(&directory)
+        .spawn()
+        .map_err(|error| format!("Não foi possível abrir a pasta: {error}"))?;
+    #[cfg(not(windows))]
+    return Err("Abrir pastas está disponível apenas no Windows.".into());
+    Ok(())
+}
+
+#[tauri::command]
+fn open_project_repository() -> Result<(), String> {
+    #[cfg(windows)]
+    Command::new("explorer.exe")
+        .arg("https://github.com/NskBR/SFTranslator")
+        .spawn()
+        .map_err(|error| format!("Não foi possível abrir o repositório: {error}"))?;
+    #[cfg(not(windows))]
+    return Err("Abrir o repositório está disponível apenas no Windows.".into());
+    Ok(())
 }
 
 #[tauri::command]
@@ -564,6 +615,9 @@ pub fn run() {
             clear_game_cache,
             get_settings,
             update_settings,
+            storage_paths,
+            open_storage_folder,
+            open_project_repository,
             models::delete_model,
             models::download_model,
             session::launch_game,

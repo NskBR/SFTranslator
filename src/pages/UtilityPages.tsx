@@ -1,6 +1,6 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef } from "react";
 import { Activity, ChevronLeft, Download, Gamepad2, Play, Square, Wrench, X } from "lucide-react";
-import type { AppSettings, EngineHealth, Game, DownloadTask, SessionLine } from "../types";
+import type { EngineHealth, Game, DownloadTask, SessionLine } from "../types";
 import { PageHeading } from "../components/Common";
 import { isTestOnlyGame } from "../engines";
 
@@ -14,7 +14,6 @@ export function Diagnostics({ health, onAddRpgMaker, onAddUnreal }: { health: En
   </section></div>;
 }
 function Check({label,value}:{label:string;value:boolean}) { return <div className="check"><span>{label}</span><b className={value?"good":"muted"}>{value?"Encontrado":"Não confirmado"}</b></div>; }
-export function SettingsPage({settings,onChange,updates}:{settings:AppSettings;onChange:(settings:AppSettings)=>void;updates?:ReactNode}) { return <div className="page"><PageHeading eyebrow="PREFERÊNCIAS" title="Configurações" text="A nova base manterá modelos e dados fora das pastas dos jogos."/><section className="settings-card"><div><h3>Tema</h3><p>Interface escura</p><span className="switch on"><i/></span></div><div><h3>Idioma da interface</h3><p>Português (Brasil)</p><button className="secondary">Alterar</button></div><div className="experimental-setting"><div><h3>Fluxo encadeado experimental</h3><p>Libera 1 → EN → 2 quando não existir modelo direto. Usa duas etapas no mesmo servidor local.</p></div><button type="button" className={`switch ${settings.enableExperimentalChainedFlow?"on":""}`} aria-pressed={settings.enableExperimentalChainedFlow} onClick={()=>onChange({...settings,enableExperimentalChainedFlow:!settings.enableExperimentalChainedFlow})}><i/></button></div>{updates}</section></div>; }
 export function DownloadsPage({tasks}:{tasks:DownloadTask[]}) { return <div className="page"><PageHeading eyebrow="OPERAÇÕES" title="Downloads" text="Acompanhe modelos e componentes sem bloquear o restante do aplicativo."/>{tasks.length?<section className="downloads-list">{tasks.map(task=><article key={task.id} className={task.status}><div className="download-status">{task.status==="baixando"?<span className="spinner"/>:task.status==="concluído"?<Activity size={19}/>:<X size={19}/>}</div><div className="download-copy"><h3>{task.name}</h3><p>{task.detail}</p>{task.status==="baixando"&&<div className="progress-track"><i style={{width:`${task.progress}%`}}/></div>}</div><span className="download-label">{task.status}</span></article>)}</section>:<section className="empty-card compact"><div className="panel-icon"><Download size={24}/></div><h2>Nenhum download por enquanto</h2><p>Os modelos iniciados em Modelos Universais aparecerão aqui.</p></section>}</div>; }
 export function SessionPage({game,lines,running,onBack,onRestart,onStop}:{game:Game;lines:SessionLine[];running:boolean;onBack:()=>void;onRestart:()=>void;onStop:()=>void}) {
   const testOnly=isTestOnlyGame(game);
