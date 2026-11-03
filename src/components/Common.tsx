@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Download, Trash2, X } from "lucide-react";
+import { Download, Trash2, X } from "./icons";
 import type { Game } from "../types";
 
 export function DeleteGameModal({ game, onCancel, onConfirm }: { game: Game; onCancel: () => void; onConfirm: () => void }) {

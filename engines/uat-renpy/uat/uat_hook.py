@@ -461,6 +461,7 @@ def translate_batch(texts, retries=2):
                 for t, r in zip(texts, result):
                     if r and r != t:
                         log.ok(f"TRAD: {repr(t[:80])} -> {repr(r[:80])}")
+                        log.ok(f"TRAD_METRIC: {len(str(r).split())}")
                     elif r == t and len(t) > 3:
                         log.hook(f"IDENT {pname}: {repr(t[:60])}")
                         if pname == "google_free":

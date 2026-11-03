@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronRight, Gamepad2, Languages } from "lucide-react";
+import { ChevronLeft, ChevronRight, Gamepad2, Languages } from "../components/icons";
 import type { Game, TranslationModel } from "../types";
 import { LanguageFlag, UiSelect } from "../components/LanguageControls";
 import { enginePresentation, isTestOnlyGame } from "../engines";

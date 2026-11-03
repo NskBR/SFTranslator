@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { ArrowDownToLine, ExternalLink, RefreshCw, X } from "lucide-react";
+import { ArrowDownToLine, ExternalLink, RefreshCw, X } from "./icons";
 import packageInfo from "../../package.json";
 
 type UpdateInfo = {

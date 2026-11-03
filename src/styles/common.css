@@ -1,0 +1,25 @@
+/* Cabeçalhos e controles compartilhados. */
+.page-heading { min-height: 48px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.eyebrow { display: block; margin-bottom: 5px; color: var(--ember); font-size: var(--font-label); font-weight: 800; letter-spacing: .11em; }
+.page-heading h1 { margin: 0 0 4px; color: var(--text); font-size: var(--font-heading); line-height: 1.2; letter-spacing: -.02em; }
+.page-heading p { margin: 0; color: var(--muted); font-size: var(--font-body); }
+.primary, .secondary, .danger-button, .back-button {
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-small);
+  font-weight: 600;
+  line-height: 1;
+  transition: .15s;
+}
+.primary { color: #1e1f22; background: var(--ember); }
+.primary:hover { background: var(--ember-strong); transform: translateY(-1px); }
+.primary:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+.secondary, .back-button { color: var(--text-2); border-color: var(--line); background: var(--surface); }
+.secondary:hover, .back-button:hover { color: var(--text); border-color: var(--ember); }
+

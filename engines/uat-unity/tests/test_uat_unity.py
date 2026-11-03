@@ -71,6 +71,68 @@ class DetectionTests(unittest.TestCase):
         info = uat.detect_game()
         self.assertEqual(info['runtime'], 'Unknown')
 
+    def test_unity_6000_version_is_detected(self):
+        data_dir = self.make_data()
+        with open(os.path.join(data_dir, 'globalgamemanagers'), 'wb') as file:
+            file.write(b'header\x006000.5.10f1\x00')
+        self.assertEqual(uat._unity_version(data_dir), '6000.5.10f1')
+
+
+class MonoEntrypointTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.game = self.temp.name
+        os.makedirs(os.path.join(self.game, 'BepInEx', 'config'))
+        self.cfg = os.path.join(self.game, 'BepInEx', 'config', 'BepInEx.cfg')
+        self.info = {'runtime': 'Mono', 'unity_version': '6000.5.10f1'}
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_missing_config_creates_minimal_section(self):
+        uat.ensure_mono_entrypoint(self.game, self.info)
+        with open(self.cfg, 'rb') as file:
+            self.assertEqual(file.read(), b'[Preloader.Entrypoint]\nAssembly = UnityEngine.CoreModule.dll\nType = MonoBehaviour\nMethod = .cctor\n')
+
+    def test_existing_config_preserves_comments_other_sections_and_crlf(self):
+        original = b'; keep\r\n[Other]\r\nThing = yes\r\n[Preloader.Entrypoint]\r\nType = Application ; keep inline\r\nMethod = .cctor\r\n[Later]\r\nEnabled = true\r\n'
+        with open(self.cfg, 'wb') as file:
+            file.write(original)
+        uat.ensure_mono_entrypoint(self.game, self.info)
+        with open(self.cfg, 'rb') as file:
+            result = file.read()
+        self.assertIn(b'Type = MonoBehaviour ; keep inline\r\n', result)
+        self.assertIn(b'; keep\r\n[Other]\r\nThing = yes\r\n', result)
+        self.assertIn(b'[Later]\r\nEnabled = true\r\n', result)
+        self.assertNotIn(b'\n', result.replace(b'\r\n', b''))
+        uat.ensure_mono_entrypoint(self.game, self.info)
+        with open(self.cfg, 'rb') as file:
+            self.assertEqual(file.read(), result)
+
+    def test_old_unity_and_il2cpp_do_not_change_config(self):
+        original = b'[Preloader.Entrypoint]\nType = Application\n'
+        with open(self.cfg, 'wb') as file:
+            file.write(original)
+        uat.ensure_mono_entrypoint(self.game, {'runtime': 'Mono', 'unity_version': '2022.3.5f1'})
+        uat.ensure_mono_entrypoint(self.game, {'runtime': 'IL2CPP', 'unity_version': '6000.5.10f1'})
+        with open(self.cfg, 'rb') as file:
+            self.assertEqual(file.read(), original)
+
+    def test_utf8_bom_and_unknown_version_override(self):
+        original = b'\xef\xbb\xbf[Preloader.Entrypoint]\r\nType = Application\r\n'
+        with open(self.cfg, 'wb') as file:
+            file.write(original)
+        unknown = {'runtime': 'Mono', 'unity_version': None}
+        with patch.dict(os.environ, {'UAT_MONO_ENTRYPOINT': ''}):
+            self.assertIsNone(uat.ensure_mono_entrypoint(self.game, unknown))
+        with open(self.cfg, 'rb') as file:
+            self.assertEqual(file.read(), original)
+        uat.ensure_mono_entrypoint(self.game, unknown, override='monobehaviour')
+        with open(self.cfg, 'rb') as file:
+            result = file.read()
+        self.assertTrue(result.startswith(b'\xef\xbb\xbf'))
+        self.assertIn(b'Type = MonoBehaviour\r\n', result)
+
 
 class SafetyTests(unittest.TestCase):
     def test_existing_bepinex_is_preserved_when_only_xunity_is_missing(self):

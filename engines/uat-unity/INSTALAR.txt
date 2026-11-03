@@ -39,6 +39,19 @@ COMANDOS
                         baixa/ativa diretamente o par informado
   lt.exe models         lista os modelos instalados
   lt.exe server         sobe somente o servidor local
+  lt.exe config en pt-BR --mono-entrypoint=monobehaviour
+                        permite forcar o entrypoint em um jogo Mono cuja
+                        versao Unity nao foi detectada automaticamente
+
+UNITY 6 MONO
+
+  Ao instalar ou configurar um jogo Mono Unity 6000+, o launcher ajusta
+  somente [Preloader.Entrypoint] em BepInEx/config/BepInEx.cfg para
+  UnityEngine.CoreModule.dll / MonoBehaviour / .cctor. O ajuste preserva
+  comentarios, demais secoes e arquivos do jogo. Jogos Unity anteriores
+  mantem o entrypoint existente. Se a versao nao puder ser lida, nenhuma
+  alteracao automatica e feita; use --mono-entrypoint=monobehaviour apenas
+  depois de confirmar o caso no diagnostico/log.
 
 O jogo deve ser iniciado pelo lt.exe ou pelo start_translation.bat para
 garantir que o servidor local esteja ativo. Jogos com anti-cheat podem

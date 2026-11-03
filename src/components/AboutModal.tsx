@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { BookOpen, Boxes, Languages, Terminal, X } from "lucide-react";
+import { BookOpen, Boxes, Languages, Terminal, X } from "./icons";
 import logo from "../assets/sftranslator-logo-v2.png";
 
 export function AboutModal({ version, onClose }: { version: string; onClose: () => void }) {

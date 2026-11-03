@@ -1,0 +1,38 @@
+.translator-metrics-page { display: flex; flex-direction: column; gap: 14px; }
+.translator-metrics-header { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.translator-metrics-header h1 { margin: 0 0 4px; font-size: var(--font-heading); line-height: 1.2; }
+.translator-metrics-header p, .translator-metrics-note { margin: 0; color: var(--text-2); font-size: var(--font-small); line-height: 1.45; }
+.translator-metrics-header button { flex: 0 0 auto; }
+.translator-metrics-layout { display: grid; grid-template-columns: minmax(210px, 260px) minmax(0, 1fr); gap: 12px; align-items: stretch; }
+.translator-metrics-chart, .translator-metric-card { min-width: 0; border: 1px solid var(--line); border-radius: var(--theme-card-radius); background: var(--surface); }
+.translator-metrics-chart { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 16px; }
+.translator-metrics-chart h2 { width: 100%; margin: 0; color: var(--text-2); font-size: 13px; }
+.translator-metrics-donut { width: min(160px, 100%); aspect-ratio: 1; display: grid; place-items: center; border-radius: 50%; }
+.translator-metrics-donut > div { width: 76%; aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 50%; background: var(--surface); }
+.translator-metrics-donut strong { color: var(--text); font-size: 26px; font-variant-numeric: tabular-nums; }
+.translator-metrics-donut span { color: var(--text-2); font-size: 11px; }
+.translator-metrics-legend { width: 100%; display: flex; justify-content: space-between; gap: 10px; color: var(--text-2); font-size: 12px; }
+.translator-metrics-legend span { display: flex; align-items: center; gap: 7px; }
+.translator-metrics-legend i { width: 9px; height: 9px; border-radius: 50%; }
+.translator-metrics-legend i.success { background: var(--ready); }
+.translator-metrics-legend i.failure { background: var(--danger); }
+.translator-metrics-legend b { color: var(--text); font-variant-numeric: tabular-nums; }
+.translator-metrics-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.translator-metric-card { display: flex; flex-direction: column; justify-content: center; gap: 7px; padding: 16px; border-left: 3px solid var(--ember); }
+.translator-metric-card.hero { grid-column: 1 / -1; background: linear-gradient(115deg, var(--ember-soft), var(--surface) 70%); }
+.translator-metric-card.success { border-left-color: var(--ready); }
+.translator-metric-card.failure { border-left-color: var(--danger); }
+.translator-metric-card > span, .translator-metric-heading { color: var(--text-2); font-size: 12px; font-weight: 650; }
+.translator-metric-heading { display: flex; align-items: center; gap: 8px; }
+.translator-metric-heading .sf-animated-icon { color: var(--ember); }
+.translator-metric-card strong { color: var(--text); font-size: 25px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.translator-metric-card.hero strong { color: var(--ember); font-size: 31px; }
+.translator-metric-card p { margin: 0; color: var(--text-2); font-size: 11px; line-height: 1.4; }
+.translator-metrics-note { max-width: 740px; }
+.translator-metrics-error { margin: 0; color: var(--danger); font-size: 12px; }
+:root[data-wallpaper="on"] .translator-metrics-chart,
+:root[data-wallpaper="on"] .translator-metric-card { background: var(--theme-glass); border-color: var(--theme-glass-edge); backdrop-filter: blur(10px) saturate(125%); }
+:root[data-wallpaper="on"] .translator-metric-card.hero { background: linear-gradient(115deg, var(--ember-soft), transparent), var(--theme-glass); }
+:root[data-wallpaper="on"] .translator-metrics-donut > div { background: var(--surface); }
+@media (max-width: 850px) { .translator-metrics-layout { grid-template-columns: 1fr; } .translator-metrics-chart { display: grid; grid-template-columns: 120px 1fr; gap: 8px 14px; } .translator-metrics-chart h2 { grid-column: 2; } .translator-metrics-donut { grid-column: 1; grid-row: 1 / 4; width: 120px; } }
+@media (max-width: 580px) { .translator-metrics-cards { grid-template-columns: 1fr; } .translator-metric-card.hero { grid-column: auto; } }

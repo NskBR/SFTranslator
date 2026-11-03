@@ -1,5 +1,5 @@
 use crate::{
-    engines, integration_state, load_games, runtime_directory, save_games, Game,
+    engines, integration_state, load_games, metrics, runtime_directory, save_games, Game,
 };
 use std::{
     fs::{self, OpenOptions},
@@ -16,6 +16,7 @@ use std::{
 use tauri::{AppHandle, Emitter, Manager};
 
 static ACTIVE_GAME_PID: Mutex<Option<u32>> = Mutex::new(None);
+static ACTIVE_GAME_ID: Mutex<Option<String>> = Mutex::new(None);
 static ACTIVE_SESSION: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn game_is_running() -> bool {
@@ -23,9 +24,22 @@ pub(crate) fn game_is_running() -> bool {
 }
 
 pub(crate) fn session_log(app: &AppHandle, kind: &str, text: impl Into<String>) {
+    let text = text.into();
+    if let Some(words) = metrics::word_marker(&text) {
+        if let Ok(guard) = ACTIVE_GAME_ID.lock() {
+            if let Some(game_id) = guard.as_deref() {
+                if let Err(error) = metrics::record_words(app, game_id, words) {
+                    eprintln!("Falha ao registrar palavras traduzidas: {error}");
+                } else {
+                    app.emit("metrics-updated", ()).ok();
+                }
+            }
+        }
+        return;
+    }
     app.emit(
         "session-log",
-        serde_json::json!({"kind":kind,"text":text.into()}),
+        serde_json::json!({"kind":kind,"text":text}),
     )
     .ok();
 }
@@ -347,25 +361,29 @@ pub(crate) fn launch_game(app: AppHandle, game_id: String) -> Result<(), String>
     if ACTIVE_SESSION.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
         return Err("Já existe uma sessão de jogo em andamento.".into());
     }
+    if let Ok(mut current) = ACTIVE_GAME_ID.lock() { *current = Some(game.id.clone()); }
     session_log(
         &app,
         "system",
         format!("Preparando sessão para {}…", game.name),
     );
     std::thread::spawn(move || {
-        let result = run_game_session(app.clone(), game, project);
-        ACTIVE_SESSION.store(false, Ordering::SeqCst);
-        match result {
-            Ok(code) => {
-                app.emit("session-ended", serde_json::json!({"code":code}))
-                    .ok();
-            }
+        let result = run_game_session(app.clone(), game.clone(), project);
+        let code = match result {
+            Ok(code) => code,
             Err(error) => {
+                if let Err(metric_error) = metrics::record_failure(&app, &game.id) {
+                    eprintln!("Falha ao registrar sessão com erro: {metric_error}");
+                } else {
+                    app.emit("metrics-updated", ()).ok();
+                }
                 session_log(&app, "error", error);
-                app.emit("session-ended", serde_json::json!({"code":-1}))
-                    .ok();
+                -1
             }
-        }
+        };
+        if let Ok(mut current) = ACTIVE_GAME_ID.lock() { *current = None; }
+        ACTIVE_SESSION.store(false, Ordering::SeqCst);
+        app.emit("session-ended", serde_json::json!({"code":code})).ok();
     });
     Ok(())
 }

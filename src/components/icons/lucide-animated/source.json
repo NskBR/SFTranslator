@@ -1,0 +1,87 @@
+{
+  "repository": "https://github.com/pqoqubbw/icons",
+  "revision": "4662fff2b60fdcf4751b32013606756caf7c4c26",
+  "adaptations": "Span wrappers and removal of project-specific cn utility; application adapter controls hover and focus.",
+  "files": [
+    {
+      "file": "settings.tsx",
+      "url": "https://raw.githubusercontent.com/pqoqubbw/icons/4662fff2b60fdcf4751b32013606756caf7c4c26/icons/settings.tsx",
+      "sha256": "dccbe307789095c85bd7847c383360e721bd235c42c95c069d6fc28b0fde22bc"
+    },
+    {
+      "file": "download.tsx",
+      "url": "https://raw.githubusercontent.com/pqoqubbw/icons/4662fff2b60fdcf4751b32013606756caf7c4c26/icons/download.tsx",
+      "sha256": "0ed66e1c4473f8004e6b455d968697fb6250ea51c3943f4d7e09b1364e0d2792"
+    },
+    {
+      "file": "archive.tsx",
+      "url": "https://raw.githubusercontent.com/pqoqubbw/icons/4662fff2b60fdcf4751b32013606756caf7c4c26/icons/archive.tsx",
+      "sha256": "1f3cfe7013e90f7b478336938a7066e16166be3d6de28141cc9c49481bf211b7"
+    },
+    {
+      "file": "file-text.tsx",
+      "url": "https://raw.githubusercontent.com/pqoqubbw/icons/4662fff2b60fdcf4751b32013606756caf7c4c26/icons/file-text.tsx",
+      "sha256": "8f01570965f44e845a59805687437566be563c6a460bf715da202fa7da0411c4"
+    },
+    {
+      "file": "chart-no-axes-column-increasing.tsx",
+      "url": "https://raw.githubusercontent.com/pqoqubbw/icons/4662fff2b60fdcf4751b32013606756caf7c4c26/icons/chart-no-axes-column-increasing.tsx",
+      "sha256": "ce10eeb40cfebb01b6e5c8c9c9a9548fcf912e0f9160cb35033b4de9c9811743"
+    },
+    {
+      "file": "folder-open.tsx",
+      "url": "https://raw.githubusercontent.com/pqoqubbw/icons/4662fff2b60fdcf4751b32013606756caf7c4c26/icons/folder-open.tsx",
+      "sha256": "72d8d277ece1340b6be36613f57f9dcaf878b8e8c6c3555b31e1feb0591ef51b"
+    },
+    {
+      "file": "palette.tsx",
+      "url": "https://raw.githubusercontent.com/pqoqubbw/icons/4662fff2b60fdcf4751b32013606756caf7c4c26/icons/palette.tsx",
+      "sha256": "0a4775cb3330855040672add71281c125eeb9477fa8e375b8a6c217871121756"
+    },
+    {
+      "file": "languages.tsx",
+      "url": "https://raw.githubusercontent.com/pqoqubbw/icons/4662fff2b60fdcf4751b32013606756caf7c4c26/icons/languages.tsx",
+      "sha256": "80cf43f4bd1f9d5cd97793ce42e392de9a9cdbe2fff03ff270a2ff239bd62b8f"
+    },
+    {
+      "file": "sliders-horizontal.tsx",
+      "url": "https://raw.githubusercontent.com/pqoqubbw/icons/4662fff2b60fdcf4751b32013606756caf7c4c26/icons/sliders-horizontal.tsx",
+      "sha256": "ee29c0f32d5f0f5b15d6a75d388ef8d2a465f88ab69128a77061e14f1357965b"
+    },
+    {
+      "file": "refresh-cw.tsx",
+      "url": "https://raw.githubusercontent.com/pqoqubbw/icons/4662fff2b60fdcf4751b32013606756caf7c4c26/icons/refresh-cw.tsx",
+      "sha256": "a6d4495667c8cac9b264d797b8aa228bb6bd5233cef501f61de67e4d08310102"
+    },
+    {
+      "file": "link.tsx",
+      "url": "https://raw.githubusercontent.com/pqoqubbw/icons/4662fff2b60fdcf4751b32013606756caf7c4c26/icons/link.tsx",
+      "sha256": "1028dcb9020fae2c5381261f1b3d993456272ecc86f14d9d2a78c9ae1564910f"
+    },
+    {
+      "file": "search.tsx",
+      "url": "https://raw.githubusercontent.com/pqoqubbw/icons/4662fff2b60fdcf4751b32013606756caf7c4c26/icons/search.tsx",
+      "sha256": "cbe4c3b09a8e5611517a525b38f6136558a59414451e25c77d72376a1115261b"
+    },
+    {
+      "file": "pause.tsx",
+      "url": "https://raw.githubusercontent.com/pqoqubbw/icons/4662fff2b60fdcf4751b32013606756caf7c4c26/icons/pause.tsx",
+      "sha256": "36b5a1fc3ddabd4a76a1c8a67f8c4b07a71184c60f80a4da2a6218db9889b99a"
+    },
+    {
+      "file": "play.tsx",
+      "url": "https://raw.githubusercontent.com/pqoqubbw/icons/4662fff2b60fdcf4751b32013606756caf7c4c26/icons/play.tsx",
+      "sha256": "76a7e3834f3a1b4db62548fb479fe068b8b58ec71b0c7197c0c17025251a9ef4"
+    },
+    {
+      "file": "external-link.tsx",
+      "url": "https://raw.githubusercontent.com/pqoqubbw/icons/4662fff2b60fdcf4751b32013606756caf7c4c26/icons/external-link.tsx",
+      "sha256": "3d635427fce3bffe72dd246c88d9f8db096f1ed88406837d5863f2674dd1a026"
+    },
+    {
+      "file": "cpu.tsx",
+      "url": "https://raw.githubusercontent.com/pqoqubbw/icons/4662fff2b60fdcf4751b32013606756caf7c4c26/icons/cpu.tsx",
+      "sha256": "c4c95032cbe32a02591bbd3cb11a5e0bbe7876c77a34b7bbff42a9d701f1bf26"
+    }
+  ]
+}

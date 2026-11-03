@@ -1,9 +1,12 @@
 mod catalog;
 mod engines;
 mod models;
+mod metrics;
 mod session;
 mod updater;
+mod themes;
 use models::models_directory;
+use themes::settings::{validate_appearance, ThemePreferences};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -11,6 +14,36 @@ use std::{
     process::Command,
 };
 use tauri::{AppHandle, Manager};
+
+#[cfg(windows)]
+fn suppress_native_window_border(window: &tauri::WebviewWindow) {
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmSetWindowAttribute(
+            hwnd: *mut std::ffi::c_void,
+            attribute: u32,
+            value: *const u32,
+            size: u32,
+        ) -> i32;
+    }
+
+    if let Ok(hwnd) = window.hwnd() {
+        // Windows 11: DWMWA_BORDER_COLOR = 34, DWMWA_COLOR_NONE = 0xFFFFFFFE.
+        // Only the DWM outline is disabled; the webview's alpha corners remain.
+        let color = 0xFFFF_FFFEu32;
+        let result = unsafe {
+            DwmSetWindowAttribute(
+                hwnd.0,
+                34,
+                &color,
+                std::mem::size_of::<u32>() as u32,
+            )
+        };
+        if result < 0 {
+            eprintln!("Não foi possível remover o contorno DWM: HRESULT 0x{:08X}", result as u32);
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,13 +84,15 @@ struct AppSettings {
     enable_experimental_chained_flow: bool,
     #[serde(default = "default_theme")]
     theme: String,
+    #[serde(default)]
+    appearance: ThemePreferences,
 }
 
 fn default_theme() -> String { "amber".into() }
 
 impl Default for AppSettings {
     fn default() -> Self {
-        Self { enable_experimental_chained_flow: false, theme: default_theme() }
+        Self { enable_experimental_chained_flow: false, theme: default_theme(), appearance: ThemePreferences::default() }
     }
 }
 
@@ -484,9 +519,10 @@ fn get_settings(app: AppHandle) -> Result<AppSettings, String> { load_settings(&
 
 #[tauri::command]
 fn update_settings(app: AppHandle, settings: AppSettings) -> Result<AppSettings, String> {
-    if !matches!(settings.theme.as_str(), "amber" | "ocean" | "violet" | "forest") {
+    if !matches!(settings.theme.as_str(), "amber" | "ocean" | "violet" | "contrast" | "crimson" | "forest") {
         return Err("Tema desconhecido.".into());
     }
+    validate_appearance(&settings.appearance)?;
     save_settings(&app, &settings)?;
     Ok(settings)
 }
@@ -605,6 +641,21 @@ fn engine_health(app: AppHandle) -> Vec<EngineHealth> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            #[cfg(windows)]
+            if let Some(window) = app.get_webview_window("main") {
+                suppress_native_window_border(&window);
+            }
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            #[cfg(windows)]
+            if matches!(event, tauri::WindowEvent::Focused(_)) {
+                if let Some(webview) = window.app_handle().get_webview_window(window.label()) {
+                    suppress_native_window_border(&webview);
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             list_games,
             add_game,
@@ -615,6 +666,16 @@ pub fn run() {
             clear_game_cache,
             get_settings,
             update_settings,
+            themes::theme_images::import_theme_image,
+            themes::theme_images::list_theme_images,
+            themes::theme_images::read_theme_image,
+            themes::official_themes::official_theme_catalog,
+            themes::official_themes::installed_official_themes,
+            themes::official_themes::download_official_theme,
+            themes::official_themes::delete_official_theme,
+            themes::local_themes::import_local_theme,
+            themes::local_themes::list_local_themes,
+            themes::local_themes::delete_local_theme,
             storage_paths,
             open_storage_folder,
             open_project_repository,
@@ -624,6 +685,7 @@ pub fn run() {
             session::stop_game_session,
             engine_health,
             models::list_models,
+            metrics::translation_metrics,
             updater::check_for_updates,
             updater::update_download_status,
             updater::download_update,

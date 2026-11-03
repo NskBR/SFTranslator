@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, ChevronDown, ChevronRight, Gamepad2, LayoutGrid, List, Pencil, Play, Plus, Search, Square, Terminal, Trash2 } from "lucide-react";
+import { ArrowDown, ChevronDown, ChevronRight, Gamepad2, LayoutGrid, List, Pencil, Play, Plus, Search, Square, Terminal, Trash2 } from "../components/icons";
 import type { Game } from "../types";
 import { LanguageFlag } from "../components/LanguageControls";
 import { enginePresentation, isTestOnlyGame } from "../engines";

@@ -637,6 +637,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             _log('[TRAD] {} -> {} | {} => {}'.format(
                 frm, to, str(text).replace('\n', ' ')[:180],
                 str(translated).replace('\n', ' ')[:180]))
+            if translated and translated != text:
+                _log('[METRIC] words={}'.format(len(str(translated).split())))
             self._send(200, translated)
             return
         if parsed.path == '/health':
@@ -670,6 +672,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         _log('[TRAD] {} -> {} | {} => {}'.format(
             frm, to, str(text).replace('\n', ' ')[:180],
             str(translated).replace('\n', ' ')[:180]))
+        if translated and translated != text:
+            _log('[METRIC] words={}'.format(len(str(translated).split())))
         self._send(200, json.dumps({'translatedText': translated}), ctype='application/json')
 
 class _Srv(http.server.ThreadingHTTPServer):
@@ -799,6 +803,8 @@ def _pe_arch(path):
     except (OSError, EOFError, struct.error):
         return 'Unknown'
 
+_UNITY_VERSION_PATTERN = _re.compile(rb'(?<!\d)(?:6000|20\d{2}|[3-9])\.\d+\.\d+[abfp]\d+(?!\d)')
+
 def _unity_version(data_dir):
     if not data_dir:
         return None
@@ -807,12 +813,105 @@ def _unity_version(data_dir):
         try:
             with open(path, 'rb') as f:
                 sample = f.read(2 * 1024 * 1024)
-            match = _re.search(rb'(?<!\d)(20\d{2}|[3-9])\.\d+\.\d+[abfp]\d+(?!\d)', sample)
+            match = _UNITY_VERSION_PATTERN.search(sample)
             if match:
                 return match.group(0).decode('ascii')
         except OSError:
             continue
+    # Some builds omit the editor version from globalgamemanagers. The managed
+    # assembly can still contain it; avoid guessing from the game's file name.
+    path = os.path.join(data_dir, 'Managed', 'UnityEngine.CoreModule.dll')
+    try:
+        with open(path, 'rb') as f:
+            match = _UNITY_VERSION_PATTERN.search(f.read(8 * 1024 * 1024))
+        if match:
+            return match.group(0).decode('ascii')
+    except OSError:
+        pass
     return None
+
+def _bepinex_cfg_encoding(raw):
+    if raw.startswith(b'\xef\xbb\xbf'):
+        return 'utf-8-sig'
+    if raw.startswith(b'\xff\xfe'):
+        return 'utf-16'
+    if raw.startswith(b'\xfe\xff'):
+        return 'utf-16'
+    try:
+        raw.decode('utf-8')
+        return 'utf-8'
+    except UnicodeDecodeError:
+        return 'cp1252'
+
+def _patch_bepinex_entrypoint(text, entrypoint):
+    newline = '\r\n' if '\r\n' in text else '\n'
+    lines = text.splitlines(keepends=True)
+    section = _re.compile(r'^\s*\[\s*Preloader\.Entrypoint\s*\]\s*(?:[;#].*)?$', _re.I)
+    section_header = _re.compile(r'^\s*\[[^]]+\]')
+    values = {'assembly': 'UnityEngine.CoreModule.dll', 'type': entrypoint, 'method': '.cctor'}
+    first = next((i for i, line in enumerate(lines) if section.match(line.rstrip('\r\n'))), None)
+    if first is None:
+        prefix = '' if not text or text.endswith(('\n', '\r')) else newline
+        return text + prefix + '[Preloader.Entrypoint]' + newline + ''.join(
+            '{} = {}{}'.format(key.title(), value, newline) for key, value in values.items())
+    end = next((i for i in range(first + 1, len(lines)) if section_header.match(lines[i])), len(lines))
+    seen = set()
+    for i in range(first + 1, end):
+        match = _re.match(r'^(\s*)(Assembly|Type|Method)(\s*=\s*)([^\r\n;#]*)(.*)$', lines[i], _re.I)
+        if not match:
+            continue
+        key = match.group(2).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        ending = '\r\n' if lines[i].endswith('\r\n') else '\n' if lines[i].endswith('\n') else ''
+        suffix = match.group(4)[len(match.group(4).rstrip()):] + match.group(5).rstrip('\r\n')
+        lines[i] = '{}{}{}{}{}{}'.format(match.group(1), match.group(2), match.group(3), values[key], suffix, ending)
+    missing = [key for key in values if key not in seen]
+    if missing:
+        if end and not lines[end - 1].endswith(('\n', '\r')):
+            lines[end - 1] += newline
+        lines[end:end] = ['{} = {}{}'.format(key.title(), values[key], newline) for key in missing]
+    return ''.join(lines)
+
+def ensure_mono_entrypoint(game_dir, info=None, override=None):
+    """Use the later BepInEx 5 entrypoint for Unity 6 Mono only."""
+    info = info or detect_game()
+    if info.get('runtime') != 'Mono':
+        return None
+    version = info.get('unity_version')
+    forced = (override or os.environ.get('UAT_MONO_ENTRYPOINT') or '').strip().lower()
+    if forced and forced not in ('application', 'monobehaviour'):
+        raise ValueError('mono-entrypoint deve ser application ou monobehaviour')
+    entrypoint = 'MonoBehaviour' if forced == 'monobehaviour' else 'Application' if forced else (
+        'MonoBehaviour' if version and int(version.split('.', 1)[0]) >= 6000 else None)
+    if not entrypoint:
+        print('[INFO] Unity {}: entrypoint existente mantido.'.format(version or 'desconhecido'), flush=True)
+        return None
+    cfg_path = os.path.join(game_dir, 'BepInEx', 'config', 'BepInEx.cfg')
+    if not os.path.isdir(os.path.join(game_dir, 'BepInEx')):
+        return None
+    try:
+        with open(cfg_path, 'rb') as file:
+            raw = file.read()
+    except FileNotFoundError:
+        raw = b''
+    encoding = _bepinex_cfg_encoding(raw)
+    updated = _patch_bepinex_entrypoint(raw.decode(encoding), entrypoint).encode(encoding)
+    if updated != raw:
+        os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
+        # Replace atomically so an interrupted launch cannot truncate the config.
+        temp_path = cfg_path + '.uat.tmp'
+        try:
+            with open(temp_path, 'wb') as file:
+                file.write(updated)
+            os.replace(temp_path, cfg_path)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+    print('[INFO] Unity {} | BepInEx Mono entrypoint: {} | {}'.format(
+        version or 'desconhecido', entrypoint, cfg_path), flush=True)
+    return cfg_path
 
 def detect_game():
     exe = find_game_exe()
@@ -1267,6 +1366,8 @@ def install_bepinex_xunity(runtime=None, architecture=None, on_step=None):
     finally:
         if stage:
             shutil.rmtree(stage, ignore_errors=True)
+    if runtime == 'Mono':
+        ensure_mono_entrypoint(GAME_DIR, info)
     cfg = load_config()
     cfg['installation'] = {
         'runtime': runtime,
@@ -1817,6 +1918,17 @@ def show_diagnostics(wait=True):
     print('  Sinais:             {}'.format(', '.join(
         key for key, value in info['signals'].items() if value) or 'nenhum'))
     print('  BepInEx:            {}'.format(status['bepinex_runtime'] or 'nao instalado'))
+    cfg_path = os.path.join(GAME_DIR, 'BepInEx', 'config', 'BepInEx.cfg')
+    try:
+        with open(cfg_path, 'rb') as file:
+            raw = file.read()
+        text = raw.decode(_bepinex_cfg_encoding(raw))
+        section = _re.search(r'(?ims)^\s*\[Preloader\.Entrypoint\]\s*$((?:(?!^\s*\[).)*)', text)
+        selected = _re.search(r'(?im)^\s*Type\s*=\s*([^;#\r\n]+)', section.group(1)) if section else None
+        current = selected.group(1).strip() if selected else 'padrão do BepInEx'
+    except (OSError, UnicodeError):
+        current = 'config não encontrado'
+    print('  Entrypoint Mono:    {} ({})'.format(current, cfg_path))
     print('  XUnity:             {}'.format('instalado' if status['xunity'] else 'nao instalado'))
     print('  Compatibilidade:    {}'.format('OK' if status['runtime_match'] else 'CONFLITO'))
     if wait:
@@ -1825,6 +1937,7 @@ def show_diagnostics(wait=True):
 
 def _do_start():
     cfg = load_config()
+    ensure_mono_entrypoint(GAME_DIR, detect_game())
     src = _argos_code(cfg.get('source_language', 'en'))
     tgt = _argos_code(cfg.get('target_language', 'pt-BR'))
     if (src, tgt) not in installed_models():
@@ -1890,6 +2003,15 @@ def menu():
 
 def main():
     args = sys.argv[1:]
+    entrypoint_flags = [arg for arg in args if arg.startswith('--mono-entrypoint=')]
+    if len(entrypoint_flags) > 1:
+        raise SystemExit('Use apenas um --mono-entrypoint.')
+    if entrypoint_flags:
+        value = entrypoint_flags[0].split('=', 1)[1].lower()
+        if value not in ('application', 'monobehaviour'):
+            raise SystemExit('--mono-entrypoint deve ser application ou monobehaviour')
+        os.environ['UAT_MONO_ENTRYPOINT'] = value
+        args.remove(entrypoint_flags[0])
     command = args[0].lower() if args else ''
     if command == '__rpgmaker_ocr__':
         if not getattr(sys, 'frozen', False):
@@ -1914,9 +2036,11 @@ def main():
             raise SystemExit(1)
         return
     if command in ('config', 'configure', 'idiomas', 'languages'):
-        if not detect_game()['valid']:
+        info = detect_game()
+        if not info['valid']:
             print('[ERRO] Configuracao recusada: jogo Unity nao encontrado em {}'.format(GAME_DIR))
             return
+        ensure_mono_entrypoint(GAME_DIR, info)
         source = args[1] if len(args) > 1 else None
         target = args[2] if len(args) > 2 else None
         flow_mode = args[3] if len(args) > 3 else 'direct'

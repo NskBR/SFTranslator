@@ -23,7 +23,26 @@ export interface Game {
 
 export interface AppSettings {
   enableExperimentalChainedFlow: boolean;
-  theme: "amber" | "ocean" | "violet" | "forest";
+  theme: "amber" | "ocean" | "violet" | "contrast" | "crimson" | "forest";
+  appearance: ThemePreferences;
+}
+
+export interface ThemePreferences {
+  accent: string | null;
+  background: string | null;
+  panel: string | null;
+  surface: string | null;
+  font: "system" | "serif" | "mono";
+  gradient: "none" | "aurora" | "sunset" | "ocean" | "cyberpunk";
+  gradientAngle: number;
+  animations: boolean;
+  animatedIcons: boolean;
+  iconStyle: "default" | "accent" | "soft";
+  imageId: string | null;
+  localThemeId: string | null;
+  officialThemeId: string | null;
+  localThemeVariant: number;
+  customCss: string;
 }
 
 export interface EngineHealth {

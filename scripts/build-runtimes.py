@@ -1,5 +1,6 @@
 """Build the application-owned Windows runtimes; never copy user translation models."""
 from pathlib import Path
+import argparse
 import json
 import shutil
 import subprocess
@@ -12,6 +13,9 @@ WORK = APP / "src-tauri/target/runtime-build"
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--engine', choices=('all', 'renpy', 'unity'), default='all')
+    selected = parser.parse_args().engine
     OUTPUT.mkdir(parents=True, exist_ok=True)
     WORK.mkdir(parents=True, exist_ok=True)
     # Sentence splitting is part of the engine, not an on-demand game dependency.
@@ -22,6 +26,8 @@ def main():
         ("renpy", ENGINES / "uat-renpy/uat/_run_lt.py", ["libretranslate", "argostranslate", "argostranslatefiles", "minisbd", "ctranslate2", "sentencepiece", "onnxruntime"]),
         ("unity", ENGINES / "uat-unity/uat_unity.py", ["argostranslate", "minisbd", "ctranslate2", "sentencepiece", "onnxruntime", "langdetect"]),
     ]:
+        if selected != 'all' and selected != engine:
+            continue
         destination = OUTPUT / engine
         command = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--onedir", "--name", "lt",
                    "--distpath", str(destination), "--workpath", str(WORK / engine), "--specpath", str(WORK / engine)]

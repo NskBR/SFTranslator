@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Search } from "lucide-react";
+import { ChevronDown, Search } from "./icons";
 
 const LANGUAGE_COUNTRIES:Record<string,string>={ar:"SA",az:"AZ",bg:"BG",bn:"BD",ca:"ES",cs:"CZ",da:"DK",de:"DE",el:"GR",en:"US",es:"ES",et:"EE",eu:"ES",fa:"IR",fi:"FI",fr:"FR",ga:"IE",gl:"ES",he:"IL",hi:"IN",hu:"HU",id:"ID",it:"IT",ja:"JP",ko:"KR",ky:"KG",lt:"LT",lv:"LV",ms:"MY",nb:"NO",nl:"NL",pb:"BR",pl:"PL",pt:"PT",ro:"RO",ru:"RU",sk:"SK",sl:"SI",sq:"AL",sv:"SE",sw:"KE",th:"TH",tl:"PH",tr:"TR",uk:"UA",ur:"PK",vi:"VN",zh:"CN",zt:"TW"};
 export function LanguageFlag({code,name}:{code:string;name:string}) {

@@ -1,0 +1,53 @@
+/* Toast temporário. */
+.toast { position: fixed; z-index: 300; right: 18px; bottom: 18px; max-width: 430px; display: flex; align-items: center; gap: 12px; overflow: hidden; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: var(--surface-2); box-shadow: var(--shadow); font-size: var(--font-small); cursor: pointer; animation: toast-in .18s ease-out; }
+.toast svg { flex: 0 0 auto; color: var(--muted); }
+.toast::after { content: ""; position: absolute; right: 0; bottom: 0; left: 0; height: 2px; background: var(--ember); transform-origin: left; animation: toast-life 4.5s linear forwards; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+@keyframes toast-life { to { transform: scaleX(0); } }
+
+/* Fluxo da tela de configuração completa: fica dentro do painel de tradução. */
+.game-config-identity { flex: 0 0 76px; flex-wrap: nowrap; }
+.in-editor-flow { order: -1; width: 100%; }
+.in-editor-flow .flow-mode-picker { margin: 0 0 6px; }
+.in-editor-flow .flow-mode-picker button { min-height: 40px; padding: 6px 10px; }
+.in-editor-flow .chain-note { margin: 0 0 6px; }
+.chain-language-preview { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 8px; padding: 8px 11px; border-radius: 9px; background: var(--surface-2); }
+.chain-language-preview span { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.chain-language-preview small { color: var(--muted); font-size: var(--font-label); }
+.chain-language-preview b { color: var(--text); font-size: var(--font-small); }
+.chain-language-preview i { color: var(--ember); font-style: normal; }
+
+@media (max-width: 980px) {
+  .settings-grid { grid-template-columns: 1fr; }
+  .settings-tabs button { gap: 5px; padding: 0 5px; font-size: var(--font-label); }
+  .library-header { height: auto; flex-direction: column; align-items: stretch; }
+  .library-header .search { max-width: none; }
+  .library-actions { justify-content: flex-end; }
+  .game-card { grid-template-columns: 54px minmax(0, 1fr) auto; }
+  .game-last-launch { display: none; }
+  .models-overview, .models-guide { grid-template-columns: 1fr; }
+  .models-overview article, .models-guide article { min-height: 54px; }
+  .game-config-identity { gap: 10px; }
+  .game-summary-strip { min-width: 220px; grid-template-columns: repeat(2, minmax(90px, 1fr)); }
+  .game-summary-strip > div:last-child { display: none; }
+  .game-config-panel { grid-template-columns: minmax(200px, .65fr) minmax(360px, 1.35fr); }
+  .danger-facts { display: none; }
+}
+
+@media (max-width: 760px) {
+  .settings-tabs { grid-template-columns: repeat(4, minmax(40px, 1fr)); }
+  .settings-tabs button span { display: none; }
+  .page, .session-page { padding: 12px; }
+  .library-header { height: auto; align-items: stretch; flex-direction: column; }
+  .search { max-width: none; }
+  .library-actions { justify-content: flex-end; }
+  .game-grid.view-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+  .form-row, .diagnostic-grid { grid-template-columns: 1fr; }
+  .installed-flow-picker { grid-template-columns: 1fr; }
+  .game-config-page { overflow: auto; }
+  .game-config-identity { flex: 0 0 auto; flex-wrap: wrap; }
+  .game-identity-primary { flex: 1 1 260px; }
+  .game-summary-strip { display: none; }
+  .game-config-panel { flex: 0 0 auto; grid-template-columns: 1fr; }
+  .game-file-card, .game-flow-editor { min-height: 220px; }
+}

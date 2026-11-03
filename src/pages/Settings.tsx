@@ -1,8 +1,10 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Check, FolderOpen, Languages, Palette, RefreshCw } from "lucide-react";
+import { FolderOpen, RefreshCw } from "../components/icons";
+import { Languages, Palette } from "../components/icons";
 import type { AppSettings } from "../types";
 import { PageHeading } from "../components/Common";
+import { AppearanceSettings } from "../theme/AppearanceSettings";
 
 type SettingsTab = "appearance" | "translation" | "files" | "updates";
 type StoragePaths = { data: string; models: string };
@@ -13,13 +15,6 @@ const tabs = [
   { id: "files", label: "Arquivos", Icon: FolderOpen },
   { id: "updates", label: "Atualizações", Icon: RefreshCw },
 ] as const;
-
-const themes: { id: AppSettings["theme"]; name: string; description: string; background: string; panel: string; surface: string; accent: string }[] = [
-  { id: "amber", name: "Âmbar", description: "Visual original", background: "#0b0d10", panel: "#12151b", surface: "#202530", accent: "#f59e0b" },
-  { id: "ocean", name: "Oceano", description: "Azul e ciano", background: "#09141c", panel: "#101e29", surface: "#213647", accent: "#22d3ee" },
-  { id: "violet", name: "Violeta", description: "Roxo profundo", background: "#100f1a", panel: "#191725", surface: "#302b42", accent: "#ae93ff" },
-  { id: "forest", name: "Floresta", description: "Verde escuro", background: "#0b1513", panel: "#12211d", surface: "#243931", accent: "#4adea4" },
-];
 
 export function SettingsPage({ settings, onChange, updates, onError }: {
   settings: AppSettings;
@@ -41,18 +36,12 @@ export function SettingsPage({ settings, onChange, updates, onError }: {
   };
 
   return <div className="page settings-page">
-    <PageHeading eyebrow="PREFERÊNCIAS" title="Configurações" text="Ajuste a aparência, a tradução e os arquivos do aplicativo."/>
+    <PageHeading title="Configurações" text="Ajuste a aparência, a tradução e os arquivos do aplicativo."/>
     <nav className="settings-tabs" aria-label="Categorias de configurações">
       {tabs.map(({ id, label, Icon }) => <button key={id} type="button" className={activeTab === id ? "active" : ""} aria-current={activeTab === id ? "page" : undefined} onClick={() => setActiveTab(id)}><Icon size={16}/><span>{label}</span></button>)}
     </nav>
     <div className="settings-content">
-      {activeTab === "appearance" && <section className="settings-panel">
-        <div className="settings-panel-heading"><div className="settings-panel-icon"><Palette size={18}/></div><div><h2>Tema do aplicativo</h2><p>A escolha é aplicada na hora e salva nas configurações.</p></div></div>
-        <div className="theme-grid">{themes.map(theme => <button type="button" key={theme.id} className={`theme-tile ${settings.theme === theme.id ? "selected" : ""}`} aria-pressed={settings.theme === theme.id} onClick={() => onChange({ ...settings, theme: theme.id })}>
-          <div className="theme-preview" style={{ background: theme.background }}><div style={{ background: theme.panel }}><i style={{ background: theme.accent }}/><span style={{ background: theme.surface }}/><span style={{ background: theme.surface }}/></div><div className="theme-preview-body"><span style={{ background: theme.surface }}/><span style={{ background: theme.surface }}/></div></div>
-          <div className="theme-caption"><span><b>{theme.name}</b><small>{theme.description}</small></span>{settings.theme === theme.id && <Check size={17}/>}</div>
-        </button>)}</div>
-      </section>}
+      {activeTab === "appearance" && <AppearanceSettings settings={settings} onChange={onChange} onError={onError}/>}
 
       {activeTab === "translation" && <div className="settings-grid">
         <section className="settings-panel">

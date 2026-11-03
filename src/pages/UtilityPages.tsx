@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Activity, ChevronLeft, Download, Gamepad2, Play, Square, Wrench, X } from "lucide-react";
+import { Activity, ChevronLeft, Download, Gamepad2, Play, Square, Wrench, X } from "../components/icons";
 import type { EngineHealth, Game, DownloadTask, SessionLine } from "../types";
 import { PageHeading } from "../components/Common";
 import { isTestOnlyGame } from "../engines";

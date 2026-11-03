@@ -1,38 +1,33 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { confirm, open } from "@tauri-apps/plugin-dialog";
 import "country-flag-icons/3x2/flags.css";
-import logo from "./assets/sftranslator-logo-v2.png";
 import {
-  Activity, Box, ChevronLeft, ChevronRight, CircleHelp, Download, Gamepad2,
-  ChevronDown, LayoutGrid, Library, List, Maximize2, Minus, Play, Plus, Search,
-  Settings, Trash2, Wrench, X, Pencil, Terminal, Square
-} from "lucide-react";
+  Activity, ChevronLeft, ChevronRight, Gamepad2,
+  ChevronDown, LayoutGrid, List, Play, Plus, Search,
+  Trash2, Wrench, X, Pencil, Terminal, Square
+} from "./components/icons";
 import type { AppSettings, EngineHealth, Game, TranslationModel } from "./types";
 import type { DownloadTask, SessionLine } from "./types";
 import { DeleteGameModal } from "./components/Common";
 import { AboutModal } from "./components/AboutModal";
 import { UpdateModal, UpdateSettingsRow, useUpdater } from "./components/Updater";
-import { LibraryPage, type LibrarySort, type LibraryView } from "./pages/LibraryPage";
+import { LibraryPage } from "./pages/LibraryPage";
 import { GameDetails, Wizard } from "./pages/GameConfig";
 import { Models } from "./pages/Models";
 import { Diagnostics, DownloadsPage, EmptyPage, SessionPage } from "./pages/UtilityPages";
 import { SettingsPage } from "./pages/Settings";
+import { MetricsPage } from "./pages/Metrics";
 import { isTestOnlyGame } from "./engines";
+import { applyTheme } from "./theme/applyTheme";
+import { initialSettings } from "./theme/presets";
+import { AppSidebar, AppTitlebar } from "./components/layout/AppChrome";
+import { useLibraryPreferences } from "./hooks/useLibraryPreferences";
+import { useSidebarWidth } from "./hooks/useSidebarWidth";
 
-const navigation = [
-  ["Biblioteca", Library], ["Console", Terminal],
-  ["Modelos", Box], ["Downloads", Download], ["Diagnósticos", Activity]
-] as const;
-
-const DEFAULT_SIDEBAR_WIDTH = 240;
-const COMPACT_SIDEBAR_WIDTH = 68;
-const MIN_SIDEBAR_WIDTH = 140;
-const MAX_SIDEBAR_WIDTH = 260;
-
-function App() {
+function App({ bootSettings }: { bootSettings?: AppSettings }) {
   const updater = useUpdater();
   const [page, setPage] = useState("Biblioteca");
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -41,33 +36,17 @@ function App() {
   const [health, setHealth] = useState<EngineHealth[]>([]);
   const [models, setModels] = useState<TranslationModel[]>([]);
   const [settings, setSettings] = useState<AppSettings>(() => {
+    if (bootSettings) return bootSettings;
     try {
       const cached = localStorage.getItem("sftranslator_theme");
-      const theme = cached === "ocean" || cached === "violet" || cached === "forest" ? cached : "amber";
-      return { enableExperimentalChainedFlow: false, theme };
-    } catch { return { enableExperimentalChainedFlow: false, theme: "amber" }; }
+      const theme = cached === "ocean" || cached === "violet" || cached === "contrast" || cached === "crimson" || cached === "forest" ? cached : "amber";
+      return { ...initialSettings, theme };
+    } catch { return initialSettings; }
   });
+  const settingsSaveQueue = useRef<Promise<unknown>>(Promise.resolve());
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("Todos");
-  const [libraryView, setLibraryView] = useState<LibraryView>(() => {
-    try { return localStorage.getItem("sftranslator_library_view") === "grid" ? "grid" : "list"; }
-    catch { return "list"; }
-  });
-  const changeLibraryView = (next: LibraryView) => {
-    setLibraryView(next);
-    try { localStorage.setItem("sftranslator_library_view", next); } catch { /* noop */ }
-  };
-  const [librarySort, setLibrarySort] = useState<LibrarySort>(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem("sftranslator_library_sort") || "null");
-      if (["lastLaunch", "addedAt", "name"].includes(saved?.key) && ["asc", "desc"].includes(saved?.direction)) return saved;
-    } catch { /* usa a ordem inicial */ }
-    return { key: "lastLaunch", direction: "desc" };
-  });
-  const changeLibrarySort = (next: LibrarySort) => {
-    setLibrarySort(next);
-    try { localStorage.setItem("sftranslator_library_sort", JSON.stringify(next)); } catch { /* noop */ }
-  };
+  const { view: libraryView, sort: librarySort, changeView: changeLibraryView, changeSort: changeLibrarySort } = useLibraryPreferences();
   const [toast, setToast] = useState<string>();
   const [selectedGame, setSelectedGame] = useState<Game>();
   const [downloads, setDownloads] = useState<DownloadTask[]>([]);
@@ -75,26 +54,27 @@ function App() {
   const [gamePendingDeletion, setGamePendingDeletion] = useState<Game>();
   const [sessionLines, setSessionLines] = useState<SessionLine[]>([]);
   const [sessionRunning, setSessionRunning] = useState(false);
-  const sidebarRef = useRef<HTMLElement>(null);
-  const [sidebarWidth, setSidebarWidth] = useState(() => {
-    try {
-      const saved = Number(localStorage.getItem("sftranslator_sidebar_width_v2"));
-      if (Number.isFinite(saved) && saved > 0) {
-        if (saved <= 90) return COMPACT_SIDEBAR_WIDTH;
-        return Math.min(Math.max(saved, MIN_SIDEBAR_WIDTH), MAX_SIDEBAR_WIDTH);
-      }
-    } catch { /* localStorage pode estar indisponível no preview web */ }
-    return DEFAULT_SIDEBAR_WIDTH;
-  });
-  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
-  const isSidebarCompact = sidebarWidth <= 90;
+  const { sidebarRef, width: sidebarWidth, resizing: isResizingSidebar, compact: isSidebarCompact, startResize: startSidebarResize, toggleWidth: toggleSidebarWidth } = useSidebarWidth();
   const inTauri = "__TAURI_INTERNALS__" in window;
   const appWindow = inTauri ? getCurrentWindow() : undefined;
 
   useEffect(() => {
-    document.documentElement.dataset.theme = settings.theme;
+    void applyTheme(settings);
     try { localStorage.setItem("sftranslator_theme", settings.theme); } catch { /* noop */ }
-  }, [settings.theme]);
+  }, [settings]);
+
+  useEffect(() => {
+    if (!inTauri) return;
+    const current = getCurrentWindow();
+    let live = true;
+    const updateShape = async () => {
+      const maximized = await current.isMaximized();
+      if (live) document.documentElement.dataset.windowMaximized = maximized ? "true" : "false";
+    };
+    void updateShape();
+    const resize = current.onResized(() => { void updateShape(); });
+    return () => { live = false; void resize.then(unlisten => unlisten()); };
+  }, [inTauri]);
 
   const refresh = async () => {
     const results = await Promise.allSettled([
@@ -115,39 +95,6 @@ function App() {
       { engine: "Unreal", sourceFound: true, runtimeFound: true, modelFound: false, development: true, details: "Observador de texto experimental para CatIslandPetrichor; tradução ainda não implementada." }
     ]);
   }, []);
-  useEffect(() => {
-    if (!isResizingSidebar) return;
-
-    const move = (event: MouseEvent) => {
-      const sidebar = sidebarRef.current;
-      if (!sidebar) return;
-      const rawWidth = event.clientX - sidebar.getBoundingClientRect().left;
-      const nextWidth = rawWidth < 115
-        ? COMPACT_SIDEBAR_WIDTH
-        : Math.min(Math.max(rawWidth, MIN_SIDEBAR_WIDTH), MAX_SIDEBAR_WIDTH);
-      setSidebarWidth(nextWidth);
-      try { localStorage.setItem("sftranslator_sidebar_width_v2", String(nextWidth)); } catch { /* noop */ }
-    };
-    const stop = () => setIsResizingSidebar(false);
-
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", stop);
-    return () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", stop);
-    };
-  }, [isResizingSidebar]);
-
-  const startSidebarResize = (event: ReactMouseEvent) => {
-    event.preventDefault();
-    setIsResizingSidebar(true);
-  };
-
-  const toggleSidebarWidth = () => {
-    const nextWidth = isSidebarCompact ? DEFAULT_SIDEBAR_WIDTH : COMPACT_SIDEBAR_WIDTH;
-    setSidebarWidth(nextWidth);
-    try { localStorage.setItem("sftranslator_sidebar_width_v2", String(nextWidth)); } catch { /* noop */ }
-  };
   useEffect(() => {
     if (!inTauri) return;
     const cleanups = Promise.all([
@@ -207,9 +154,11 @@ function App() {
     } catch (e) { setToast(String(e)); }
   };
 
-  const updateSettings = async (next: AppSettings) => {
-    try { setSettings(await invoke<AppSettings>("update_settings", { settings: next })); }
-    catch (error) { setToast(String(error)); }
+  const updateSettings = (next: AppSettings) => {
+    setSettings(next);
+    settingsSaveQueue.current = settingsSaveQueue.current.catch(() => undefined).then(() =>
+      invoke<AppSettings>("update_settings", { settings: next })
+    ).catch(error => { setToast(String(error)); });
   };
 
   const deleteModel = async (model: TranslationModel) => {
@@ -349,26 +298,14 @@ function App() {
           ? `${downloads.filter(task => task.status === "baixando").length} em andamento · ${downloads.filter(task => task.status === "concluído").length} concluídos nesta sessão.`
           : page === "Console"
             ? sessionRunning ? sessionGame && isTestOnlyGame(sessionGame) ? "Jogo aberto para teste, sem tradução ativa." : "Preparação do motor, servidor local e tradução em execução." : "Sessão encerrada; o histórico permanece disponível."
+            : page === "Métricas"
+              ? "Palavras e resultados registrados em sessões de tradução monitoradas."
             : "SFTranslator monitora os componentes locais dos motores integrados.";
 
   return <div className="shell">
-    <header className="titlebar" data-tauri-drag-region onMouseDown={event => { if (event.button === 0 && !(event.target as HTMLElement).closest("button")) appWindow?.startDragging(); }} onDoubleClick={event => { if (!(event.target as HTMLElement).closest("button")) appWindow?.toggleMaximize(); }}>
-      <div className="titlebar-engines">{health.map(item => { const engine=item.engine; const online=Boolean(item?.sourceFound&&item?.runtimeFound&&!item.development); return <span key={engine} title={item.details}><i className={`dot ${item.development?(item.runtimeFound?"warn":""):online?"ok":""}`}/>{item.development?`${engine==="RPG Maker"?"RPGM":engine} · dev`:engine}</span>; })}</div>
-      <div className="app-title" data-tauri-drag-region><strong>SFTranslator</strong><span>v{updater.version}</span>{updater.info?.available && <button type="button" className="titlebar-update" onClick={() => updater.setOpen(true)}>Atualização v{updater.info.latest_version}</button>}</div>
-      <div className="window-actions">
-        <button onClick={() => appWindow?.minimize()} aria-label="Minimizar"><Minus size={16}/></button>
-        <button onClick={() => appWindow?.toggleMaximize()} aria-label="Maximizar"><Maximize2 size={14}/></button>
-        <button className="close" onClick={() => appWindow?.close()} aria-label="Fechar"><X size={17}/></button>
-      </div>
-    </header>
+    <AppTitlebar health={health} version={updater.version} updateVersion={updater.info?.available ? updater.info.latest_version : undefined} onUpdate={() => updater.setOpen(true)} onMinimize={() => { void appWindow?.minimize(); }} onMaximize={() => { void appWindow?.toggleMaximize(); }} onClose={() => { void appWindow?.close(); }} onDrag={() => { void appWindow?.startDragging(); }}/>
     <div className={`workspace ${isResizingSidebar ? "workspace-resizing" : ""}`}>
-      <aside ref={sidebarRef} className={isSidebarCompact ? "sidebar-compact" : ""} style={{ width: sidebarWidth }}>
-        <div className="sidebar-brand"><img src={logo} alt="SFTranslator"/></div>
-        <nav>{navigation.map(([label, Icon],index) => <Fragment key={label}>{index===0&&<span className="nav-group-label">Biblioteca</span>}{index===2&&<span className="nav-group-label">Ferramentas</span>}<button title={isSidebarCompact ? label : undefined} className={page === label ? "active" : ""} onClick={() => setPage(label)}><Icon size={18}/><span>{label}</span>{label === "Biblioteca" && <b className="nav-count">{games.length}</b>}{label === "Console" && sessionRunning && <i className="console-live-dot" aria-label="Sessão ativa"/>}</button></Fragment>)}</nav>
-        <section className="sidebar-overview"><span>VISÃO GERAL</span><div><button onClick={()=>setPage("Biblioteca")}><b>{games.length}</b><small>{games.length===1?"Jogo":"Jogos"}</small></button><button onClick={()=>setPage("Modelos")}><b>{installedModelCount}</b><small>{installedModelCount===1?"Modelo":"Modelos"}</small></button></div><p><i className={`dot ${sessionRunning?"ok":""}`}/>{sessionRunning?sessionGame&&isTestOnlyGame(sessionGame)?"Jogo aberto para teste":"Tradução em andamento":"Aplicativo pronto"}</p></section>
-        <div className="sidebar-footer"><button className={page === "Configurações" ? "active" : ""} title="Configurações" onClick={() => setPage("Configurações")}><Settings size={18}/></button><button ref={aboutButtonRef} className={aboutOpen ? "active" : ""} title="Sobre" aria-label="Sobre o SFTranslator" onClick={() => setAboutOpen(true)}><CircleHelp size={18}/></button></div>
-        <div className="sidebar-resizer" role="separator" aria-label="Redimensionar barra lateral" aria-orientation="vertical" onMouseDown={startSidebarResize} onDoubleClick={toggleSidebarWidth}/>
-      </aside>
+      <AppSidebar sidebarRef={sidebarRef} width={sidebarWidth} compact={isSidebarCompact} page={page} setPage={setPage} gamesCount={games.length} installedModelCount={installedModelCount} sessionRunning={sessionRunning} sessionGame={sessionGame} aboutOpen={aboutOpen} aboutButtonRef={aboutButtonRef} onAbout={() => setAboutOpen(true)} onResize={startSidebarResize} onToggleWidth={toggleSidebarWidth}/>
       <main>
         {page === "Biblioteca" && (selectedGame
           ? <GameDetails game={selectedGame} models={models} experimentalEnabled={settings.enableExperimentalChainedFlow} onBack={() => setSelectedGame(undefined)} onRemove={() => setGamePendingDeletion(selectedGame)} onSave={configureGame} onOpenCache={() => openGameCache(selectedGame)} onClearCache={() => clearGameCache(selectedGame)}/>
@@ -382,6 +319,7 @@ function App() {
         {page === "Console" && !sessionGame && <EmptyPage icon={Terminal} title="Console" text="Inicie um jogo pela biblioteca para acompanhar a instalação e a tradução. O histórico da última sessão fica disponível aqui enquanto o aplicativo estiver aberto."/>}
         {page === "Diagnósticos" && <Diagnostics health={health} onAddRpgMaker={() => beginAddGame("RPG Maker")} onAddUnreal={() => beginAddGame("Unreal")}/>}
         {page === "Configurações" && <SettingsPage settings={settings} onChange={updateSettings} updates={<UpdateSettingsRow updater={updater}/>} onError={setToast}/>}
+        {page === "Métricas" && <MetricsPage/>}
         <footer className="context-bar"><span><Activity size={14}/>{contextText}</span><b>{sessionRunning ? "Sessão ativa" : "Pronto"}</b></footer>
       </main>
     </div>

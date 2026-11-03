@@ -1,0 +1,32 @@
+/* Downloads e sessão CLI. */
+.downloads-list { display: flex; flex-direction: column; gap: 8px; }
+.downloads-list article { min-height: 76px; display: flex; align-items: center; gap: 13px; padding: 12px 16px; border: 1px solid var(--line); border-left: 3px solid var(--status-warning); border-radius: var(--radius); background: var(--surface); }
+.downloads-list article.concluído { border-left-color: var(--ready); }
+.downloads-list article.erro { border-left-color: var(--danger); }
+.download-status { width: 40px; height: 40px; flex: 0 0 auto; display: grid; place-items: center; color: var(--status-warning); }
+.downloads-list article.concluído .download-status { color: var(--ready); }
+.downloads-list article.erro .download-status { color: var(--danger); }
+.download-copy { min-width: 0; flex: 1; }
+.download-copy h3 { margin: 0 0 4px; font-size: var(--font-title); }
+.download-copy p { margin: 0; color: var(--muted); font-size: var(--font-small); }
+.download-label { color: var(--muted); font-size: var(--font-label); font-weight: 700; text-transform: uppercase; }
+.progress-track { height: 5px; margin-top: 8px; overflow: hidden; border-radius: 99px; background: var(--line); }
+.progress-track i { display: block; height: 100%; border-radius: inherit; background: var(--ember); transition: width .25s; }
+.spinner { width: 19px; height: 19px; border: 2px solid var(--line); border-top-color: var(--ember); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.session-page { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 16px 18px 12px; }
+.session-page > header { height: 38px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.session-page header > div { display: flex; align-items: center; gap: 7px; }
+.session-page header > .session-actions { gap: 14px; }
+.session-page header > .session-actions > div { display: flex; align-items: center; gap: 7px; }
+.session-restart { min-height: 32px; padding: 0 11px; font-size: var(--font-label); }
+.session-page header small { color: var(--muted); font-size: var(--font-label); }
+.session-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.session-dot.live { background: var(--ready); box-shadow: 0 0 8px rgba(16, 185, 129, .5); }
+.terminal { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border-radius: 12px; color: #c8d0dc; background: #090b0f; font: var(--font-small)/1.55 ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.terminal-head, .terminal footer { height: 38px; flex: 0 0 38px; display: flex; align-items: center; justify-content: space-between; padding: 0 13px; color: var(--muted); background: #10131a; }
+.terminal-output { flex: 1; min-height: 0; overflow: auto; padding: 10px 13px; overflow-anchor: none; user-select: text; -webkit-user-select: text; }
+.terminal-output p { display: flex; gap: 8px; margin: 0 0 4px; }
+.terminal-output i { color: var(--ember); font-style: normal; }
+.terminal-output .error { color: #ff8a8a; }
+

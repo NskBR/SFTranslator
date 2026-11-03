@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Activity, Box, ChevronRight, Download, Gamepad2, Languages, Trash2, Wrench, X } from "lucide-react";
+import { Activity, Box, ChevronRight, Download, Gamepad2, Languages, Trash2, Wrench, X } from "../components/icons";
 import type { Game, TranslationModel } from "../types";
 import { LanguageFlag, UiSelect } from "../components/LanguageControls";
 import { PageHeading } from "../components/Common";
