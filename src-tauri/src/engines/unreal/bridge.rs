@@ -156,7 +156,7 @@ mod tests {
     fn direct_and_chained_cache_keys_differ() {
         let mut game = Game {
             id: "id".into(), name: "sample".into(), executable_path: "x".into(),
-            engine: "Unreal".into(), runtime: None, architecture: None, status: String::new(),
+            engine: "Unreal".into(), runtime: None, suggested_rpg_maker_family: None, architecture: None, status: String::new(),
             source_language: "ja".into(), target_language: "pb".into(),
             added_at: String::new(), last_launch: None, icon_data: None, model_installed: false,
             detected_language: None, language_confidence: None, integration_status: None,

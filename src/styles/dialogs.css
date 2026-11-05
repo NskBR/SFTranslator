@@ -7,7 +7,9 @@
 .model-modal header > button { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); }
 .model-modal header > button:hover { color: var(--text); background: var(--surface); }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; }
-.rpg-family-select { display: flex; flex-direction: column; gap: 5px; min-width: 155px; max-width: 240px; margin: 8px 0; color: var(--text-2); font-size: var(--font-label); }
+.rpg-family-select { display: flex; flex-direction: column; gap: 5px; min-width: 155px; max-width: 320px; margin: 8px 0; color: var(--text-2); font-size: var(--font-label); }
+.rpg-family-recommendation { color: var(--text-2); line-height: 1.4; }
+.rpg-family-recommendation b { color: var(--ember); }
 .rpg-family-select select { width: 100%; }
 .form-row label { display: flex; flex-direction: column; gap: 6px; color: var(--text-2); font-size: var(--font-label); }
 .form-row select { width: 100%; height: 38px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--surface); outline: none; }

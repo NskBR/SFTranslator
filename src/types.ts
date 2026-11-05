@@ -6,6 +6,7 @@ export interface Game {
   executablePath: string;
   engine: Engine;
   runtime?: string;
+  suggestedRpgMakerFamily?: string;
   architecture?: string;
   status: "Novo" | "Pronto" | "Atenção" | "Instalação pendente" | "Modelo necessário" | "Em desenvolvimento" | "Em teste";
   sourceLanguage: string;
@@ -23,6 +24,7 @@ export interface Game {
 
 export interface AppSettings {
   enableExperimentalChainedFlow: boolean;
+  enableTrayMode: boolean;
   theme: "amber" | "ocean" | "violet" | "contrast" | "crimson" | "forest";
   appearance: ThemePreferences;
 }

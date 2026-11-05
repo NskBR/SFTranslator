@@ -35,7 +35,7 @@
 }
 
 @media (max-width: 760px) {
-  .settings-tabs { grid-template-columns: repeat(4, minmax(40px, 1fr)); }
+  .settings-tabs { grid-template-columns: repeat(5, minmax(40px, 1fr)); }
   .settings-tabs button span { display: none; }
   .page, .session-page { padding: 12px; }
   .library-header { height: auto; align-items: stretch; flex-direction: column; }

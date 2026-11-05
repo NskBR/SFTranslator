@@ -203,9 +203,7 @@ pub(crate) fn update_integration_record(app: &AppHandle, game_id: &str) {
     };
     let (ready, status) = integration_state(game);
     game.integration_status = Some(status);
-    game.status = if game.engine == "RPG Maker" && matches!(game.runtime.as_deref(), Some("95" | "2000/2003" | "XP" | "VX" | "VX Ace")) && game.model_installed {
-        "Em teste".into()
-    } else if game.model_installed && ready {
+    game.status = if game.model_installed && ready {
         "Pronto".into()
     } else {
         "Instalação pendente".into()
@@ -259,6 +257,18 @@ fn run_game_session(app: AppHandle, game: Game, project: PathBuf) -> Result<i32,
     let adapter = engines::by_name(&game.engine)?;
     let executable = adapter.launch_path(&game);
     let game_root = executable.parent().ok_or("Pasta do jogo inválida.")?;
+    let nwjs_profile = if game.engine == "RPG Maker"
+        && matches!(game.runtime.as_deref(), Some("MV" | "MZ"))
+        && game_root.join("nw.dll").is_file()
+        && game_root.join("package.json").is_file()
+    {
+        let profile = app.path().app_data_dir().map_err(|error| error.to_string())?
+            .join("rpgmaker").join("nw-profiles").join(&game.id);
+        fs::create_dir_all(&profile).map_err(|error| format!("Não foi possível criar o perfil NW.js isolado: {error}"))?;
+        Some(profile)
+    } else {
+        None
+    };
     let stop_tail = Arc::new(AtomicBool::new(false));
     let engines::EngineSession {
         server,
@@ -286,6 +296,10 @@ fn run_game_session(app: AppHandle, game: Game, project: PathBuf) -> Result<i32,
     command
         .current_dir(game_root)
         .env("SFTRANSLATOR_MANAGED_RUNTIME", "1");
+    if let Some(profile) = nwjs_profile {
+        command.arg(format!("--user-data-dir={}", profile.display()));
+        session_log(&app, "system", format!("Perfil NW.js isolado para {}: {}", game.name, profile.display()));
+    }
     let mut child = match spawn_streaming(command, &app, "jogo") {
         Ok(child) => child,
         Err(error) => {
@@ -345,6 +359,9 @@ pub(crate) fn launch_game(app: AppHandle, game_id: String) -> Result<(), String>
         .find(|game| game.id == game_id)
         .ok_or("Jogo não encontrado.")?;
     let adapter = engines::by_name(&game.engine)?;
+    if game.engine == "RPG Maker" && !adapter.translation_available(game) {
+        return Err("Escolha e salve a versão do RPG Maker antes de iniciar o jogo.".into());
+    }
     if adapter.translation_available(game) && !game.model_installed {
         return Err("Instale o modelo configurado antes de iniciar o jogo.".into());
     }

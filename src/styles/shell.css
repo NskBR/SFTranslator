@@ -113,7 +113,8 @@ aside nav button.active .nav-count { color: var(--ember); background: rgba(var(-
 .sidebar-compact .sidebar-brand img { width: 46px; height: 46px; }
 .sidebar-compact nav { width: 100%; align-items: center; }
 .sidebar-compact nav button { width: 44px; min-height: 42px; justify-content: center; padding: 0; margin: 0 auto; }
-.sidebar-compact nav button > span, .sidebar-compact .nav-count, .sidebar-compact .nav-group-label, .sidebar-compact .sidebar-overview { display: none; }
+.sidebar-compact nav button .console-live-dot { position: absolute; top: 6px; right: 6px; width: 7px !important; height: 7px !important; margin-left: 0; pointer-events: none; }
+.sidebar-compact nav button > span:not(.sf-animated-icon):not(.console-live-dot), .sidebar-compact .nav-count, .sidebar-compact .nav-group-label, .sidebar-compact .sidebar-overview { display: none; }
 .sidebar-compact .sidebar-footer { flex-direction: column; align-items: center; }
 
 main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: transparent; }

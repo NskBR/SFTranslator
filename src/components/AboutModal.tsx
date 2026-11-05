@@ -34,7 +34,7 @@ export function AboutModal({ version, onClose }: { version: string; onClose: () 
           <span><Terminal size={17}/>Console em tempo real</span>
           <span><BookOpen size={17}/>Biblioteca de jogos</span>
         </div>
-        <p className="about-explanation">Adicione o executável, escolha os idiomas e baixe os modelos necessários. Ao iniciar o jogo, o SFTranslator prepara a integração do motor e usa o tradutor local. Ren’Py e Unity têm integração própria; RPG Maker e Unreal ainda estão em teste experimental.</p>
+        <p className="about-explanation">Adicione o executável, escolha os idiomas e baixe os modelos necessários. Ao iniciar o jogo, o SFTranslator prepara a integração do motor e usa o tradutor local. Ren’Py, Unity e RPG Maker têm integração própria; Unreal ainda está em teste experimental.</p>
         <dl className="about-details">
           <div><dt>Versão</dt><dd>v{version}</dd></div>
           <div><dt>Autor</dt><dd>NskBR</dd></div>

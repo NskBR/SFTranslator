@@ -271,8 +271,8 @@ impl EngineAdapter for RpgMaker {
             source_found: true,
             runtime_found: runtimes.is_some_and(|root| root.join("unity/lt.exe").is_file()),
             model_found: models_present,
-            development: true,
-            details: "MV/MZ usam plugin JavaScript; Unite usa BepInEx/XUnity; 95, 2000/2003 e RGSS usam OCR local experimental com sobreposição, sujeito ao idioma OCR e ao modo de janela.".into(),
+            development: false,
+            details: "MV/MZ usam plugin JavaScript; Unite usa BepInEx/XUnity; 95, 2000/2003 e RGSS usam OCR local, sujeito ao idioma OCR e ao modo de janela.".into(),
         }
     }
 

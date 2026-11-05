@@ -6,6 +6,10 @@ const vm = require("node:vm");
 
 const plugin = fs.readFileSync(require("node:path").join(__dirname, "..", "js", "SFTranslator.js"), "utf8");
 
+test("MV plugin avoids optional chaining unsupported by older NW.js releases", () => {
+    assert.doesNotMatch(plugin, /\?\./);
+});
+
 function makeGame({ gameId = "test-game", source = "en", target = "pb", flowMode = "direct", port = 5002, fetchImpl, storage, clock } = {}) {
     const values = storage || new Map();
     class Game_Message {

@@ -1,12 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { FolderOpen, RefreshCw } from "../components/icons";
+import { FolderOpen, RefreshCw, Settings } from "../components/icons";
 import { Languages, Palette } from "../components/icons";
 import type { AppSettings } from "../types";
 import { PageHeading } from "../components/Common";
 import { AppearanceSettings } from "../theme/AppearanceSettings";
 
-type SettingsTab = "appearance" | "translation" | "files" | "updates";
+type SettingsTab = "appearance" | "translation" | "files" | "updates" | "app";
 type StoragePaths = { data: string; models: string };
 
 const tabs = [
@@ -14,6 +14,7 @@ const tabs = [
   { id: "translation", label: "Tradução", Icon: Languages },
   { id: "files", label: "Arquivos", Icon: FolderOpen },
   { id: "updates", label: "Atualizações", Icon: RefreshCw },
+  { id: "app", label: "Aplicativo", Icon: Settings },
 ] as const;
 
 export function SettingsPage({ settings, onChange, updates, onError }: {
@@ -57,6 +58,8 @@ export function SettingsPage({ settings, onChange, updates, onError }: {
       </div>}
 
       {activeTab === "updates" && <section className="settings-panel settings-update-panel"><div className="settings-panel-heading"><div className="settings-panel-icon"><RefreshCw size={18}/></div><div><h2>Atualizações</h2><p>Consulte a versão publicada no GitHub e instale quando estiver pronto.</p></div></div>{updates}</section>}
+
+      {activeTab === "app" && <section className="settings-panel"><div className="settings-panel-heading"><div className="settings-panel-icon"><Settings size={18}/></div><div><h2>Bandeja do sistema</h2><p>Controle o comportamento do aplicativo ao fechar a janela.</p></div></div><div className="settings-toggle-row"><div><b>Manter na bandeja ao fechar</b><span>O SFTranslator continua em execução com os jogos e traduções ativos. Clique no ícone da bandeja para reabrir; use “Sair” no menu do ícone para encerrar o aplicativo.</span></div><button type="button" role="switch" aria-checked={settings.enableTrayMode ?? false} aria-label="Ativar modo bandeja" className={`switch ${settings.enableTrayMode ? "on" : ""}`} onClick={() => onChange({ ...settings, enableTrayMode: !settings.enableTrayMode })}><i/></button></div></section>}
     </div>
   </div>;
 }

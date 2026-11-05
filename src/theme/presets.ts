@@ -8,7 +8,7 @@ export const defaultAppearance: ThemePreferences = {
 };
 
 export const initialSettings: AppSettings = {
-  enableExperimentalChainedFlow: false, theme: "amber", appearance: defaultAppearance,
+  enableExperimentalChainedFlow: false, enableTrayMode: false, theme: "amber", appearance: defaultAppearance,
 };
 
 export const themePresets: { id: AppSettings["theme"]; name: string; background: string; panel: string; surface: string; accent: string; gradient?: string }[] = [

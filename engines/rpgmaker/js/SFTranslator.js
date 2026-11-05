@@ -177,7 +177,8 @@
                     const translated = await translatePlain(value);
                     if (field[index] !== value || translated === value) continue;
                     field[index] = translated;
-                    const windows = window.SceneManager?._scene?._windowLayer?.children || [];
+                    const scene = window.SceneManager && window.SceneManager._scene;
+                    const windows = scene && scene._windowLayer && scene._windowLayer.children || [];
                     for (const gameWindow of windows) {
                         if (typeof gameWindow.refresh === "function") gameWindow.refresh();
                     }
@@ -205,13 +206,13 @@
                     requestedMapNames.delete(original);
                     if (!window.$gameMap ||
                         originalDisplayName.call(window.$gameMap) !== original) return;
-                    const mapData = window.$gameSystem?._mapNameData;
+                    const mapData = window.$gameSystem && window.$gameSystem._mapNameData;
                     if (mapData) mapData.name = translated;
-                    const scene = window.SceneManager?._scene;
-                    if (scene?._mapNameHud && typeof scene._mapNameHud.refreshName === "function") {
+                    const scene = window.SceneManager && window.SceneManager._scene;
+                    if (scene && scene._mapNameHud && typeof scene._mapNameHud.refreshName === "function") {
                         scene._mapNameHud.refreshName();
                     }
-                    if (scene?._mapNameWindow && typeof scene._mapNameWindow.refresh === "function") {
+                    if (scene && scene._mapNameWindow && typeof scene._mapNameWindow.refresh === "function") {
                         scene._mapNameWindow.refresh();
                     }
                 }).catch(error => {

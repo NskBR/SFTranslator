@@ -83,7 +83,7 @@ pub(super) fn inspect(
             return Ok((adapter.name().into(), found.runtime, found.architecture));
         }
     }
-    Err("Não foi possível reconhecer o motor deste jogo. Se for RPG Maker, use o cadastro manual de teste em Diagnósticos.".into())
+    Err("Não foi possível reconhecer o motor deste jogo. Se for RPG Maker, use o cadastro manual em Diagnósticos.".into())
 }
 
 pub(super) fn health(runtimes: Option<&Path>, models_present: bool) -> Vec<EngineHealth> {

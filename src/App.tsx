@@ -91,7 +91,7 @@ function App({ bootSettings }: { bootSettings?: AppSettings }) {
     else setHealth([
       { engine: "Ren'Py", sourceFound: true, runtimeFound: true, modelFound: true, details: "Hook moderno e legado; servidor local LibreTranslate/Argos." },
       { engine: "Unity", sourceFound: true, runtimeFound: true, modelFound: false, details: "Instalador BepInEx/XUnity para Mono e IL2CPP." },
-      { engine: "RPG Maker", sourceFound: true, runtimeFound: true, modelFound: false, development: true, details: "MV/MZ e Unite com hooks experimentais; versões antigas com OCR local e sobreposição em teste." },
+      { engine: "RPG Maker", sourceFound: true, runtimeFound: true, modelFound: false, details: "MV/MZ e Unite com integração local; versões antigas com OCR local e sobreposição." },
       { engine: "Unreal", sourceFound: true, runtimeFound: true, modelFound: false, development: true, details: "Observador de texto experimental para CatIslandPetrichor; tradução ainda não implementada." }
     ]);
   }, []);
@@ -150,7 +150,7 @@ function App({ bootSettings }: { bootSettings?: AppSettings }) {
       }
       const updated = await invoke<Game>("configure_game", { gameId: game.id, sourceLanguage, targetLanguage, flowMode, intermediateLanguage, rpgMakerFamily });
       await refresh(); setSelectedGame(undefined); setPage("Biblioteca");
-      setToast(testOnly ? "Escolha uma versão compatível para testar a tradução." : game.engine === "Unreal" ? "Fluxo Unreal experimental salvo. O hook será atualizado ao iniciar o jogo." : game.engine === "RPG Maker" ? ["95","2000/2003","XP","VX","VX Ace"].includes(rpgMakerFamily||game.runtime||"") ? `Fluxo ${rpgMakerFamily} salvo. O OCR local experimental será iniciado com o jogo.` : `Fluxo ${rpgMakerFamily||game.runtime} experimental salvo. A integração será instalada ao iniciar o jogo.` : updated.modelInstalled ? "Configuração salva. O fluxo está disponível." : "Configuração salva. Baixe o fluxo necessário em Modelos.");
+      setToast(testOnly ? "Jogo cadastrado para teste de reconhecimento." : game.engine === "Unreal" ? "Fluxo Unreal experimental salvo. O hook será atualizado ao iniciar o jogo." : game.engine === "RPG Maker" ? ["95","2000/2003","XP","VX","VX Ace"].includes(rpgMakerFamily||game.runtime||"") ? `Fluxo ${rpgMakerFamily} salvo. O OCR local será iniciado com o jogo.` : `Fluxo ${rpgMakerFamily||game.runtime} salvo. A integração será instalada ao iniciar o jogo.` : updated.modelInstalled ? "Configuração salva. O fluxo está disponível." : "Configuração salva. Baixe o fluxo necessário em Modelos.");
     } catch (e) { setToast(String(e)); }
   };
 

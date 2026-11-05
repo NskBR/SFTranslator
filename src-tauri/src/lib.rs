@@ -15,6 +15,23 @@ use std::{
 };
 use tauri::{AppHandle, Manager};
 
+const TRAY_ID: &str = "sftranslator-tray";
+
+fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+fn set_tray_visible(app: &AppHandle, visible: bool) -> Result<(), String> {
+    app.tray_by_id(TRAY_ID)
+        .ok_or("Ícone da bandeja não encontrado.")?
+        .set_visible(visible)
+        .map_err(|error| error.to_string())
+}
+
 #[cfg(windows)]
 fn suppress_native_window_border(window: &tauri::WebviewWindow) {
     #[link(name = "dwmapi")]
@@ -53,6 +70,8 @@ struct Game {
     executable_path: String,
     engine: String,
     runtime: Option<String>,
+    #[serde(default)]
+    suggested_rpg_maker_family: Option<String>,
     architecture: Option<String>,
     status: String,
     source_language: String,
@@ -82,6 +101,8 @@ fn default_flow_mode() -> String { "direct".into() }
 struct AppSettings {
     #[serde(default)]
     enable_experimental_chained_flow: bool,
+    #[serde(default)]
+    enable_tray_mode: bool,
     #[serde(default = "default_theme")]
     theme: String,
     #[serde(default)]
@@ -92,7 +113,7 @@ fn default_theme() -> String { "amber".into() }
 
 impl Default for AppSettings {
     fn default() -> Self {
-        Self { enable_experimental_chained_flow: false, theme: default_theme(), appearance: ThemePreferences::default() }
+        Self { enable_experimental_chained_flow: false, enable_tray_mode: false, theme: default_theme(), appearance: ThemePreferences::default() }
     }
 }
 
@@ -337,10 +358,10 @@ fn list_games(app: AppHandle) -> Result<Vec<Game>, String> {
             game.integration_status = Some(integration_status);
             changed = true;
         }
-        let status = if engines::by_name(&game.engine).is_ok_and(|adapter| !adapter.translation_available(game)) {
+        let status = if game.engine == "RPG Maker" && game.runtime.is_none() {
+            "Novo"
+        } else if engines::by_name(&game.engine).is_ok_and(|adapter| !adapter.translation_available(game)) {
             "Em desenvolvimento"
-        } else if game.engine == "RPG Maker" && matches!(game.runtime.as_deref(), Some("95" | "2000/2003" | "XP" | "VX" | "VX Ace")) && game.model_installed {
-            "Em teste"
         } else if game.model_installed && integration_ready {
             "Pronto"
         } else if game.model_installed {
@@ -366,9 +387,9 @@ fn add_game(app: AppHandle, executable_path: String, engine_hint: Option<String>
         .canonicalize()
         .map_err(|_| "O executável selecionado não existe.".to_string())?;
     let canonical = native_game_path(&canonical);
-    let (engine, runtime, architecture) = if engine_hint.as_deref() == Some("RPG Maker") {
+    let (engine, detected_runtime, architecture) = if engine_hint.as_deref() == Some("RPG Maker") {
         let detected = engines::by_name("RPG Maker")?.inspect(&canonical);
-        ("RPG Maker".into(), detected.as_ref().and_then(|found| found.runtime.clone()).or(Some("Não identificado (teste)".into())), detected.and_then(|found| found.architecture).or_else(|| pe_architecture(&canonical)))
+        ("RPG Maker".into(), detected.as_ref().and_then(|found| found.runtime.clone()), detected.and_then(|found| found.architecture).or_else(|| pe_architecture(&canonical)))
     } else if engine_hint.as_deref() == Some("Unreal") {
         let detected = engines::by_name("Unreal")?.inspect(&canonical)
             .ok_or("Não encontrei Content/Paks com arquivos .pak ou .utoc para confirmar que este executável é Unreal.")?;
@@ -376,6 +397,8 @@ fn add_game(app: AppHandle, executable_path: String, engine_hint: Option<String>
     } else {
         inspect_game(&canonical)?
     };
+    let suggested_rpg_maker_family = if engine == "RPG Maker" { detected_runtime.clone() } else { None };
+    let runtime = if engine == "RPG Maker" { None } else { detected_runtime };
     let (detected_language, language_confidence) = inspect_language(&canonical, &engine);
     let mut games = load_games(&app)?;
     if games
@@ -394,6 +417,7 @@ fn add_game(app: AppHandle, executable_path: String, engine_hint: Option<String>
         executable_path: canonical.to_string_lossy().into_owned(),
         engine,
         runtime,
+        suggested_rpg_maker_family,
         architecture,
         status: "Novo".into(),
         source_language: detected_language.clone(),
@@ -410,7 +434,7 @@ fn add_game(app: AppHandle, executable_path: String, engine_hint: Option<String>
     };
     let (_, integration_status) = integration_state(&game);
     let mut game = game;
-    if engines::by_name(&game.engine).is_ok_and(|adapter| !adapter.translation_available(&game)) {
+    if game.engine != "RPG Maker" && engines::by_name(&game.engine).is_ok_and(|adapter| !adapter.translation_available(&game)) {
         game.status = "Em desenvolvimento".into();
     }
     if game.engine == "RPG Maker" {
@@ -486,6 +510,9 @@ fn configure_game(
             }
             game.runtime = Some(family);
         }
+        if !engines::by_name("RPG Maker")?.translation_available(game) {
+            return Err("Escolha a versão do RPG Maker antes de salvar.".into());
+        }
     }
     if flow_mode == "chain" && !load_settings(&app)?.enable_experimental_chained_flow && game.flow_mode != "chain" {
         return Err("Ative o fluxo experimental nas Configurações antes de criar uma cadeia.".into());
@@ -500,8 +527,6 @@ fn configure_game(
     game.integration_status = Some(integration_status);
     game.status = if engines::by_name(&game.engine).is_ok_and(|adapter| !adapter.translation_available(game)) {
         "Em desenvolvimento".into()
-    } else if game.engine == "RPG Maker" && matches!(game.runtime.as_deref(), Some("95" | "2000/2003" | "XP" | "VX" | "VX Ace")) && game.model_installed {
-        "Em teste".into()
     } else if game.model_installed && integration_ready {
         "Pronto".into()
     } else if game.model_installed {
@@ -523,6 +548,7 @@ fn update_settings(app: AppHandle, settings: AppSettings) -> Result<AppSettings,
         return Err("Tema desconhecido.".into());
     }
     validate_appearance(&settings.appearance)?;
+    set_tray_visible(&app, settings.enable_tray_mode)?;
     save_settings(&app, &settings)?;
     Ok(settings)
 }
@@ -642,6 +668,28 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            let open = tauri::menu::MenuItem::with_id(app, "tray-open", "Abrir SFTranslator", true, None::<&str>)?;
+            let quit = tauri::menu::MenuItem::with_id(app, "tray-quit", "Sair", true, None::<&str>)?;
+            let menu = tauri::menu::Menu::with_items(app, &[&open, &quit])?;
+            let mut tray = tauri::tray::TrayIconBuilder::with_id(TRAY_ID)
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .tooltip("SFTranslator")
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "tray-open" => show_main_window(app),
+                    "tray-quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let tauri::tray::TrayIconEvent::Click { button: tauri::tray::MouseButton::Left, button_state: tauri::tray::MouseButtonState::Up, .. } = event {
+                        show_main_window(tray.app_handle());
+                    }
+                });
+            if let Some(icon) = app.default_window_icon() {
+                tray = tray.icon(icon.clone());
+            }
+            let tray = tray.build(app)?;
+            tray.set_visible(load_settings(app.handle()).map(|settings| settings.enable_tray_mode).unwrap_or(false))?;
             #[cfg(windows)]
             if let Some(window) = app.get_webview_window("main") {
                 suppress_native_window_border(&window);
@@ -649,6 +697,12 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" && load_settings(window.app_handle()).map(|settings| settings.enable_tray_mode).unwrap_or(false) {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
             #[cfg(windows)]
             if matches!(event, tauri::WindowEvent::Focused(_)) {
                 if let Some(webview) = window.app_handle().get_webview_window(window.label()) {
@@ -704,7 +758,7 @@ mod tests {
     fn game(flow_mode: &str, middle: Option<&str>) -> Game {
         Game {
             id: "id".into(), name: "game".into(), executable_path: "game.exe".into(), engine: "Unity".into(),
-            runtime: None, architecture: None, status: "Novo".into(), source_language: "ja".into(), target_language: "pb".into(),
+            runtime: None, suggested_rpg_maker_family: None, architecture: None, status: "Novo".into(), source_language: "ja".into(), target_language: "pb".into(),
             added_at: "now".into(), last_launch: None, icon_data: None, model_installed: false, detected_language: None,
             language_confidence: None, integration_status: None, flow_mode: flow_mode.into(), intermediate_language: middle.map(str::to_string),
         }

@@ -144,6 +144,7 @@ mod tests {
             executable_path: String::new(),
             engine: "RPG Maker".into(),
             runtime: Some("MZ".into()),
+            suggested_rpg_maker_family: None,
             architecture: None,
             status: String::new(),
             source_language: "ja".into(),

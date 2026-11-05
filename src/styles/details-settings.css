@@ -99,7 +99,7 @@
 .engine-development-note { margin: 8px 0 12px; padding: 10px 12px; border: 1px solid rgba(245, 158, 11, .25); border-radius: 8px; background: var(--status-warning-soft); color: var(--text-2); font-size: var(--font-small); line-height: 1.5; }
 .settings-page { display: flex; flex-direction: column; overflow: hidden; }
 .settings-page .page-heading { flex: 0 0 auto; margin-bottom: 12px; }
-.settings-tabs { flex: 0 0 auto; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin-bottom: 12px; padding: 4px; border: 1px solid var(--line); border-radius: 11px; background: var(--bg); }
+.settings-tabs { flex: 0 0 auto; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; margin-bottom: 12px; padding: 4px; border: 1px solid var(--line); border-radius: 11px; background: var(--bg); }
 .settings-tabs button { min-width: 0; height: 38px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 8px; border-radius: 8px; color: var(--text-2); font-size: var(--font-small); font-weight: 600; white-space: nowrap; }
 .settings-tabs button svg { flex: 0 0 auto; }
 .settings-tabs button:hover { color: var(--text); background: var(--surface); }
