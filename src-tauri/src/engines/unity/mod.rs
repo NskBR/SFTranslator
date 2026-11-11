@@ -149,7 +149,9 @@ impl EngineAdapter for Unity {
         );
 
         let (integration_ready, _) = self.integration_state(game);
-        if !integration_ready {
+        // The loader can be present yet too old for the game's IL2CPP metadata.
+        // The installer checks its own installation record before upgrading it.
+        if !integration_ready || game.runtime.as_deref() == Some("IL2CPP") {
             let mut install = Command::new(&launcher);
             install
                 .arg("install")

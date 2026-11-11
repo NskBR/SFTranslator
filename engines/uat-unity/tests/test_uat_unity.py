@@ -135,6 +135,129 @@ class MonoEntrypointTests(unittest.TestCase):
 
 
 class SafetyTests(unittest.TestCase):
+    def test_only_managed_old_il2cpp_is_upgraded(self):
+        status = {'bepinex': True, 'runtime_match': True}
+        managed = {'installation': {'runtime': 'IL2CPP', 'bepinex': 'BepInEx 6.0.0-pre.2 IL2CPP x64'}}
+        self.assertTrue(uat._managed_il2cpp_upgrade_needed('IL2CPP', status, managed, 31))
+        self.assertFalse(uat._managed_il2cpp_upgrade_needed('IL2CPP', status, managed, 29))
+        self.assertFalse(uat._managed_il2cpp_upgrade_needed('Mono', status, managed, 31))
+        self.assertFalse(uat._managed_il2cpp_upgrade_needed('IL2CPP', status, {}, 31))
+        self.assertFalse(uat._managed_il2cpp_upgrade_needed('IL2CPP', status,
+                         {'installation': {'runtime': 'IL2CPP', 'bepinex': 'BepInEx 6.0.0-be.793 IL2CPP x64'}}, 31))
+
+    def test_exact_old_loader_is_recognized_without_installation_record(self):
+        old_game = uat.GAME_DIR
+        try:
+            with tempfile.TemporaryDirectory() as game:
+                uat.GAME_DIR = game
+                core = os.path.join(game, 'BepInEx', 'core')
+                os.makedirs(core)
+                old_lib = os.path.join(core, 'LibCpp2IL.dll')
+                with open(old_lib, 'wb') as file:
+                    file.write(b'old-loader')
+                status = {'bepinex': True, 'runtime_match': True}
+                with patch.object(uat, '_sha256', return_value=uat._PRE2_LIBCPP2IL_SHA256):
+                    self.assertTrue(uat._managed_il2cpp_upgrade_needed('IL2CPP', status, {}, 31))
+                with patch.object(uat, '_sha256', return_value='different'):
+                    self.assertFalse(uat._managed_il2cpp_upgrade_needed('IL2CPP', status, {}, 31))
+        finally:
+            uat.GAME_DIR = old_game
+
+    def test_il2cpp_upgrade_preserves_plugins_and_config_and_backs_up_core(self):
+        old_game, old_state = uat.GAME_DIR, uat.UAT_DIR
+        try:
+            with tempfile.TemporaryDirectory() as temp:
+                uat.GAME_DIR = os.path.join(temp, 'game')
+                uat.UAT_DIR = os.path.join(temp, 'state')
+                stage = os.path.join(temp, 'stage')
+                for root in (uat.GAME_DIR, uat.UAT_DIR, stage):
+                    os.makedirs(root)
+                for root, relative, content in (
+                    (uat.GAME_DIR, 'BepInEx/core/BepInEx.Unity.IL2CPP.dll', b'old'),
+                    (uat.GAME_DIR, 'winhttp.dll', b'old-proxy'),
+                    (uat.GAME_DIR, 'BepInEx/plugins/other.dll', b'plugin'),
+                    (uat.GAME_DIR, 'BepInEx/config/custom.cfg', b'config'),
+                    (stage, 'BepInEx/core/BepInEx.Unity.IL2CPP.dll', b'new'),
+                    (stage, 'winhttp.dll', b'new-proxy'),
+                ):
+                    path = os.path.join(root, relative)
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                    with open(path, 'wb') as file:
+                        file.write(content)
+                backup = uat._upgrade_managed_il2cpp(stage)
+                for relative, content in (
+                    ('BepInEx/core/BepInEx.Unity.IL2CPP.dll', b'new'),
+                    ('winhttp.dll', b'new-proxy'),
+                    ('BepInEx/plugins/other.dll', b'plugin'),
+                    ('BepInEx/config/custom.cfg', b'config'),
+                ):
+                    with open(os.path.join(uat.GAME_DIR, relative), 'rb') as file:
+                        self.assertEqual(file.read(), content)
+                with open(os.path.join(backup, 'BepInEx/core/BepInEx.Unity.IL2CPP.dll'), 'rb') as file:
+                    self.assertEqual(file.read(), b'old')
+        finally:
+            uat.GAME_DIR, uat.UAT_DIR = old_game, old_state
+
+    def test_managed_il2cpp_install_upgrades_old_core_without_replacing_xunity(self):
+        old_game, old_state, old_config, old_cache = uat.GAME_DIR, uat.UAT_DIR, uat.CONFIG_PATH, uat.CACHE_ZIP_DIR
+        try:
+            with tempfile.TemporaryDirectory() as temp:
+                game, state = os.path.join(temp, 'game'), os.path.join(temp, 'state')
+                os.makedirs(game)
+                os.makedirs(state)
+                uat.GAME_DIR, uat.UAT_DIR = game, state
+                uat.CONFIG_PATH = os.path.join(state, 'unity_uat_config.json')
+                uat.CACHE_ZIP_DIR = os.path.join(state, '_cache_downloads')
+                os.makedirs(uat.CACHE_ZIP_DIR)
+                write_pe(os.path.join(game, 'Sample.exe'), 0x8664)
+                write_pe(os.path.join(game, 'GameAssembly.dll'), 0x8664)
+                metadata = os.path.join(game, 'Sample_Data', 'il2cpp_data', 'Metadata')
+                os.makedirs(metadata)
+                with open(os.path.join(metadata, 'global-metadata.dat'), 'wb') as file:
+                    file.write(struct.pack('<II', 0xFAB11BAF, 31))
+                files = {
+                    'BepInEx/core/BepInEx.Unity.IL2CPP.dll': b'old-core',
+                    'BepInEx/core/XUnity.Common.dll': b'old-common',
+                    'BepInEx/plugins/XUnity.AutoTranslator/XUnity.AutoTranslator.Plugin.Core.dll': b'plugin-core',
+                    'BepInEx/plugins/XUnity.AutoTranslator/XUnity.AutoTranslator.Plugin.BepInEx-IL2CPP.dll': b'plugin-il2cpp',
+                    'BepInEx/plugins/XUnity.AutoTranslator/Translators/CustomTranslate.dll': b'custom',
+                    'BepInEx/plugins/XUnity.ResourceRedirector/XUnity.ResourceRedirector.BepInEx-IL2CPP.dll': b'redirector',
+                    'BepInEx/config/user.cfg': b'user-setting',
+                    'winhttp.dll': b'old-proxy',
+                }
+                for relative, content in files.items():
+                    path = os.path.join(game, relative)
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                    with open(path, 'wb') as file:
+                        file.write(content)
+                uat.save_config({'installation': {'runtime': 'IL2CPP', 'bepinex': 'BepInEx 6.0.0-pre.2 IL2CPP x64'}})
+                downloaded = []
+                def fake_download(url, destination, *_args):
+                    downloaded.append(url)
+                    with zipfile.ZipFile(destination, 'w') as archive:
+                        archive.writestr('BepInEx/core/BepInEx.Unity.IL2CPP.dll', b'new-core')
+                        archive.writestr('BepInEx/core/LibCpp2IL.dll', b'new-cpp2il')
+                        archive.writestr('dotnet/coreclr.dll', b'new-runtime')
+                        archive.writestr('winhttp.dll', b'new-proxy')
+                    return destination
+                with patch.object(uat, 'download_file', side_effect=fake_download):
+                    self.assertTrue(uat.install_bepinex_xunity())
+                self.assertEqual(len(downloaded), 1)
+                self.assertIn('be.793', downloaded[0])
+                for relative, expected in (
+                    ('BepInEx/core/BepInEx.Unity.IL2CPP.dll', b'new-core'),
+                    ('BepInEx/core/LibCpp2IL.dll', b'new-cpp2il'),
+                    ('dotnet/coreclr.dll', b'new-runtime'),
+                    ('BepInEx/plugins/XUnity.AutoTranslator/XUnity.AutoTranslator.Plugin.Core.dll', b'plugin-core'),
+                    ('BepInEx/config/user.cfg', b'user-setting'),
+                ):
+                    with open(os.path.join(game, relative), 'rb') as file:
+                        self.assertEqual(file.read(), expected)
+                self.assertIn('be.793', uat.load_config()['installation']['bepinex'])
+                self.assertFalse(uat._managed_il2cpp_upgrade_needed('IL2CPP', uat.installation_status(), uat.load_config(), 31))
+        finally:
+            uat.GAME_DIR, uat.UAT_DIR, uat.CONFIG_PATH, uat.CACHE_ZIP_DIR = old_game, old_state, old_config, old_cache
+
     def test_existing_bepinex_is_preserved_when_only_xunity_is_missing(self):
         old_game_dir, old_state, old_config, old_cache = uat.GAME_DIR, uat.UAT_DIR, uat.CONFIG_PATH, uat.CACHE_ZIP_DIR
         try:

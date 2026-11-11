@@ -236,17 +236,17 @@ DEPENDENCIES = {
             'fbb7d1bbe2c7cc168da6dccbc500fb74786a85a548f52495c8a1592ac46407f5'),
     },
     ('IL2CPP', 'x64'): {
-        'bepinex': ('BepInEx 6.0.0-pre.2 IL2CPP x64',
-            'https://github.com/BepInEx/BepInEx/releases/download/v6.0.0-pre.2/BepInEx-Unity.IL2CPP-win-x64-6.0.0-pre.2.zip',
-            '616ec7eb06cf11b2a0000e8fcef04d1b12bb58e84a2e0bdac9523234fc193ceb'),
+        'bepinex': ('BepInEx 6.0.0-be.793 IL2CPP x64',
+            'https://builds.bepinex.dev/projects/bepinex_be/793/BepInEx-Unity.IL2CPP-win-x64-6.0.0-be.793%2Bdbc82f0.zip',
+            '5b63d7d0e92a2448ccd13b738ff95ff1cc1026c6d718555d4df8e6c824953ac4'),
         'xunity': ('XUnity AutoTranslator 5.6.1 IL2CPP',
             'https://github.com/bbepis/XUnity.AutoTranslator/releases/download/v5.6.1/XUnity.AutoTranslator-BepInEx-IL2CPP-5.6.1.zip',
             '9d6b26e9d4957459bdb64b6d4852edb39cd5e8d31c28e0a157cefd6510ada811'),
     },
     ('IL2CPP', 'x86'): {
-        'bepinex': ('BepInEx 6.0.0-pre.2 IL2CPP x86',
-            'https://github.com/BepInEx/BepInEx/releases/download/v6.0.0-pre.2/BepInEx-Unity.IL2CPP-win-x86-6.0.0-pre.2.zip',
-            'cfef3a1e946dac5db8b9de4de1a922f47584dd775da32863f36762fbaad80f19'),
+        'bepinex': ('BepInEx 6.0.0-be.793 IL2CPP x86',
+            'https://builds.bepinex.dev/projects/bepinex_be/793/BepInEx-Unity.IL2CPP-win-x86-6.0.0-be.793%2Bdbc82f0.zip',
+            '6eb35cec828f16836674231b2ab4ab1db6c9953b7a11b34b8c8badba14218ed2'),
         'xunity': ('XUnity AutoTranslator 5.6.1 IL2CPP',
             'https://github.com/bbepis/XUnity.AutoTranslator/releases/download/v5.6.1/XUnity.AutoTranslator-BepInEx-IL2CPP-5.6.1.zip',
             '9d6b26e9d4957459bdb64b6d4852edb39cd5e8d31c28e0a157cefd6510ada811'),
@@ -1176,6 +1176,69 @@ def _copy_missing_only(stages, destination):
         raise
     return len(planned)
 
+_PRE2_LIBCPP2IL_SHA256 = 'ce7841d374afe0138d337c366a9d63900f0f767d9e0bfd24b8fdfc48af3eecd5'
+
+def _il2cpp_metadata_version(info):
+    path = os.path.join(info.get('data_dir') or '', 'il2cpp_data', 'Metadata', 'global-metadata.dat')
+    try:
+        with open(path, 'rb') as file:
+            header = file.read(8)
+        magic, version = struct.unpack('<II', header)
+        return version if magic == 0xFAB11BAF else None
+    except (OSError, struct.error):
+        return None
+
+def _managed_il2cpp_upgrade_needed(runtime, status, cfg, metadata_version):
+    installed = cfg.get('installation', {})
+    label = installed.get('bepinex', '')
+    if runtime != 'IL2CPP' or not status['bepinex'] or not status['runtime_match'] or metadata_version is None or metadata_version <= 29:
+        return False
+    if installed.get('runtime') == 'IL2CPP' and label.startswith('BepInEx 6.0.0-pre.2 IL2CPP'):
+        return True
+    # A previous SFTranslator version may have installed the loader before a
+    # per-game installation record existed. Match the exact old bundled DLL.
+    old_lib = os.path.join(GAME_DIR, 'BepInEx', 'core', 'LibCpp2IL.dll')
+    return os.path.isfile(old_lib) and _sha256(old_lib) == _PRE2_LIBCPP2IL_SHA256
+
+def _upgrade_managed_il2cpp(stage):
+    """Replace only loader-owned files, keeping game plugins, configs and translations."""
+    core = os.path.join(stage, 'BepInEx', 'core')
+    if not os.path.isfile(os.path.join(core, 'BepInEx.Unity.IL2CPP.dll')) or not os.path.isfile(os.path.join(stage, 'winhttp.dll')):
+        raise RuntimeError('pacote BepInEx IL2CPP incompleto; jogo preservado')
+    relative_files = []
+    for owned_dir in (core, os.path.join(stage, 'dotnet')):
+        for root, _dirs, files in os.walk(owned_dir):
+            for name in files:
+                relative_files.append(os.path.relpath(os.path.join(root, name), stage))
+    relative_files += ['winhttp.dll', '.doorstop_version']
+    backup = os.path.join(UAT_DIR, 'Backups', 'BepInEx-IL2CPP-' + time.strftime('%Y%m%d-%H%M%S'))
+    os.makedirs(backup, exist_ok=False)
+    replaced = []
+    try:
+        for relative in relative_files:
+            source = os.path.join(stage, relative)
+            if not os.path.isfile(source):
+                continue
+            target = os.path.join(GAME_DIR, relative)
+            if os.path.lexists(target) and not os.path.isfile(target):
+                raise RuntimeError('arquivo do loader ocupado por pasta: {}'.format(target))
+            previous = os.path.join(backup, relative)
+            if os.path.isfile(target):
+                os.makedirs(os.path.dirname(previous), exist_ok=True)
+                shutil.copy2(target, previous)
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            replaced.append((target, previous))
+            shutil.copy2(source, target)
+    except Exception:
+        for target, previous in reversed(replaced):
+            if os.path.isfile(previous):
+                shutil.copy2(previous, target)
+            else:
+                os.remove(target)
+        raise
+    print('[INFO] BepInEx IL2CPP atualizado; backup em {}. Plugins e configuracoes preservados.'.format(backup), flush=True)
+    return backup
+
 # =========================================================================
 # AutoTranslatorConfig.ini  (minimal -> XUnity expande no primeiro run)
 # =========================================================================
@@ -1303,6 +1366,14 @@ def install_bepinex_xunity(runtime=None, architecture=None, on_step=None):
     if not manifest:
         raise RuntimeError('sem modulo para {} {}'.format(runtime, architecture))
     status = installation_status(info)
+    cfg = load_config()
+    metadata_version = _il2cpp_metadata_version(info) if runtime == 'IL2CPP' else None
+    upgrade_bepinex = _managed_il2cpp_upgrade_needed(runtime, status, cfg, metadata_version)
+    if runtime == 'IL2CPP':
+        print('[INFO] Unity {} | IL2CPP metadata {} | BepInEx upgrade: {}'.format(
+            info.get('unity_version') or 'desconhecido',
+            metadata_version if metadata_version is not None else 'desconhecido',
+            'necessario' if upgrade_bepinex else 'nao'), flush=True)
     if status['bepinex_present'] and not status['bepinex']:
         raise RuntimeError('BepInEx ja existe, mas o core esta incompleto ou ambiguo. '
                            'O instalador nao vai substituir os arquivos existentes.')
@@ -1334,7 +1405,7 @@ def install_bepinex_xunity(runtime=None, architecture=None, on_step=None):
     xu_zip = os.path.join(CACHE_ZIP_DIR, os.path.basename(xu_url))
     missing_bepinex = not status['bepinex']
     missing_xunity = not status['xunity']
-    if missing_bepinex:
+    if missing_bepinex or upgrade_bepinex:
         if on_step:
             on_step(2, 'Baixando BepInEx...')
         download_file(bep_url, bep_zip, bep_label, bep_hash)
@@ -1348,31 +1419,33 @@ def install_bepinex_xunity(runtime=None, architecture=None, on_step=None):
         print('[INFO] XUnity existente preservado; plugin nao sera reinstalado.', flush=True)
     if on_step:
         on_step(4, 'Validando e instalando somente arquivos ausentes...')
-    stage = tempfile.mkdtemp(prefix='uat-install-', dir=CACHE_ZIP_DIR) if (missing_bepinex or missing_xunity) else None
+    stage = tempfile.mkdtemp(prefix='uat-install-', dir=CACHE_ZIP_DIR) if (missing_bepinex or missing_xunity or upgrade_bepinex) else None
     try:
         stages = []
-        if missing_bepinex:
+        if missing_bepinex or upgrade_bepinex:
             bep_stage = os.path.join(stage, 'bepinex')
             os.makedirs(bep_stage)
             _extract_safe(bep_zip, bep_stage)
-            stages.append(bep_stage)
+            if missing_bepinex:
+                stages.append(bep_stage)
         if missing_xunity:
             xu_stage = os.path.join(stage, 'xunity')
             os.makedirs(xu_stage)
             _extract_safe(xu_zip, xu_stage)
             stages.append(xu_stage)
         copied = _copy_missing_only(stages, GAME_DIR)
+        if upgrade_bepinex:
+            _upgrade_managed_il2cpp(bep_stage)
         print('[INFO] {} arquivo(s) novo(s) copiado(s); existentes preservados.'.format(copied), flush=True)
     finally:
         if stage:
             shutil.rmtree(stage, ignore_errors=True)
     if runtime == 'Mono':
         ensure_mono_entrypoint(GAME_DIR, info)
-    cfg = load_config()
     cfg['installation'] = {
         'runtime': runtime,
         'architecture': architecture,
-        'bepinex': bep_label if missing_bepinex else 'existente preservado',
+        'bepinex': bep_label if (missing_bepinex or upgrade_bepinex) else cfg.get('installation', {}).get('bepinex', 'existente preservado'),
         'xunity': xu_label if missing_xunity else 'existente preservado',
         'installed_at': time.strftime('%Y-%m-%dT%H:%M:%S'),
     }

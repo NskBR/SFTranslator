@@ -1,6 +1,6 @@
 [package]
 name = "uat-desktop"
-version = "0.1.6"
+version = "0.1.7"
 description = "Gerenciador unificado dos tradutores UAT"
 authors = ["UAT"]
 edition = "2021"
