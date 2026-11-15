@@ -1,0 +1,9 @@
+## Novidades
+
+- Biblioteca com filtros por motor, ordenação por nome ou data e visualizações em lista e grade.
+- Indicadores de instalação com cores fixas para os estados dos jogos.
+- Configurações organizadas em Aparência, Tradução, Arquivos e Atualizações.
+- Quatro temas: Âmbar, Oceano, Violeta e Floresta. As cores de status permanecem iguais em todos os temas.
+- Modal Sobre com informações do aplicativo, autoria de NskBR e acesso ao repositório.
+
+O instalador Windows inclui os runtimes de tradução. Modelos de idioma e componentes específicos de cada jogo seguem o fluxo de instalação do aplicativo.

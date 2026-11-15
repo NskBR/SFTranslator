@@ -1,0 +1,8 @@
+## SFTranslator 0.1.7
+
+- Corrige a instalação IL2CPP em jogos com metadata acima de 29, incluindo o caso testado de SarahsHouse (Unity 2021.3.40f1, metadata 31).
+- Atualiza o BepInEx IL2CPP antigo para um pacote com suporte a esse metadata, mantendo plugins, configurações e traduções do jogo.
+- Cria backup dos arquivos do loader substituídos antes da atualização.
+- Mantém instalações IL2CPP de jogos com metadata 29 sem migração.
+
+O instalador inclui os runtimes locais. A primeira abertura de um jogo IL2CPP pode levar mais tempo enquanto o BepInEx gera as assemblies de interop.

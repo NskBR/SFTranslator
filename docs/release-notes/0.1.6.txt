@@ -1,0 +1,9 @@
+## SFTranslator 0.1.6
+
+- Modo bandeja opcional nas Configurações.
+- RPG Maker disponível para cadastro normal, com recomendação da família detectada e seleção manual da versão.
+- Perfil NW.js isolado por jogo para evitar conflitos com perfis de outras versões.
+- Compatibilidade do plugin MV com versões antigas do NW.js.
+- Ajustes no layout compacto, busca da biblioteca e indicador do console.
+
+Instale pelo atualizador do aplicativo ou baixe `SFTranslator_0.1.6_x64-setup.exe`. O instalador inclui os runtimes locais de tradução.

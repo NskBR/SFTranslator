@@ -7,12 +7,51 @@ use std::{
     time::{Duration, Instant},
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
 
-const RELEASES_URL: &str = "https://github.com/NskBR/SFTranslator/releases";
-const API_URL: &str = "https://api.github.com/repos/NskBR/SFTranslator/releases/latest";
+const UPDATE_BASE: &str = "https://sftranslator-updates.nskbr.workers.dev/sftranslator/desktop";
+const MANIFEST_LIMIT: u64 = 64 * 1024;
+const INSTALLER_NAME: &str = "SFTranslator-Windows-x64-setup.exe";
+
+#[derive(Deserialize)]
+struct ReleaseManifest {
+    app: String,
+    platform: String,
+    version: String,
+    file: String,
+    url: String,
+    size: u64,
+    sha256: String,
+    notes: Option<String>,
+}
+
+fn manifest_url() -> String {
+    format!("{UPDATE_BASE}/latest.json")
+}
+
+impl ReleaseManifest {
+    fn installer(&self) -> Result<ApprovedInstaller, String> {
+        if self.app != "SFTranslator"
+            || self.platform != "windows-x64"
+            || version_parts(&self.version).is_none()
+            || self.file != INSTALLER_NAME
+            || self.url != format!("{UPDATE_BASE}/releases/{}/{INSTALLER_NAME}", self.version)
+            || self.size == 0
+            || self.sha256.len() != 64
+            || !self.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err("Manifesto de atualização inválido.".into());
+        }
+        Ok(ApprovedInstaller {
+            url: self.url.clone(),
+            name: self.file.clone(),
+            size: self.size,
+            digest: self.sha256.to_ascii_lowercase(),
+        })
+    }
+}
 
 #[derive(Clone, Serialize)]
 pub(crate) struct UpdateCheckResult {
@@ -55,7 +94,7 @@ struct ApprovedInstaller {
 struct UpdateRuntime {
     progress: UpdateDownloadProgress,
     approved: Option<ApprovedInstaller>,
-    ready_path: Option<PathBuf>,
+    ready: Option<(PathBuf, ApprovedInstaller)>,
     cancellation: Option<Arc<AtomicBool>>,
 }
 
@@ -71,40 +110,16 @@ fn set_progress(app: &AppHandle, progress: UpdateDownloadProgress) {
 }
 
 fn version_parts(value: &str) -> Option<[u64; 3]> {
-    let value = value.strip_prefix('v').unwrap_or(value);
     let mut parts = value.split('.');
-    let parsed = [parts.next()?.parse().ok()?, parts.next()?.parse().ok()?,
-        parts.next()?.parse().ok()?];
-    if parts.next().is_some() { None } else { Some(parsed) }
-}
-
-fn official_installer_url(value: &str) -> bool {
-    let Ok(url) = reqwest::Url::parse(value) else { return false };
-    url.scheme() == "https" && url.host_str() == Some("github.com")
-        && url.path().starts_with("/NskBR/SFTranslator/releases/download/")
-        && url.path().to_ascii_lowercase().ends_with(".exe")
-}
-
-fn safe_installer_name(name: &str) -> bool {
-    !name.is_empty() && name.len() <= 180 && name.ends_with(".exe")
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
-        && name.to_ascii_lowercase().starts_with("sftranslator_")
-        && name.to_ascii_lowercase().contains("_x64-setup.exe")
-}
-
-fn select_installer(release: &serde_json::Value, version: &str) -> Option<ApprovedInstaller> {
-    let assets = release["assets"].as_array()?;
-    assets.iter().find_map(|asset| {
-        let name = asset["name"].as_str()?;
-        let url = asset["browser_download_url"].as_str()?;
-        let digest = asset["digest"].as_str()?.strip_prefix("sha256:")?;
-        let size = asset["size"].as_u64()?;
-        if !safe_installer_name(name) || !name.contains(&format!("_{version}_"))
-            || !official_installer_url(url) || size == 0 || digest.len() != 64
-            || !digest.chars().all(|c| c.is_ascii_hexdigit()) { return None }
-        Some(ApprovedInstaller { url: url.into(), name: name.into(), size,
-            digest: digest.to_ascii_lowercase() })
-    })
+    let mut version = [0; 3];
+    for number in &mut version {
+        let part = parts.next()?;
+        *number = part.parse().ok()?;
+        if number.to_string() != part {
+            return None;
+        }
+    }
+    parts.next().is_none().then_some(version)
 }
 
 fn updates_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -117,28 +132,32 @@ fn check_release() -> Result<(UpdateCheckResult, Option<ApprovedInstaller>), Str
     let current_version = env!("CARGO_PKG_VERSION").to_string();
     let client = reqwest::blocking::Client::builder()
         .user_agent("SFTranslator-updater")
+        .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(20))
         .build().map_err(|e| e.to_string())?;
-    let response = client.get(API_URL).send()
-        .map_err(|e| format!("Não foi possível consultar o GitHub: {e}"))?
-        .error_for_status().map_err(|e| format!("GitHub recusou a consulta: {e}"))?;
-    let release: serde_json::Value = serde_json::from_reader(response)
-        .map_err(|e| format!("Resposta inválida do GitHub: {e}"))?;
-    let tag = release["tag_name"].as_str().unwrap_or("");
-    let latest = version_parts(tag).ok_or("O release mais recente não usa uma versão X.Y.Z válida.")?;
+    let response = client.get(manifest_url()).send()
+        .map_err(|e| format!("Não foi possível consultar o servidor de atualizações: {e}"))?;
+    if response.status() != reqwest::StatusCode::OK {
+        return Err(format!("Servidor de atualizações respondeu HTTP {}.", response.status()));
+    }
+    let mut bytes = Vec::new();
+    response.take(MANIFEST_LIMIT + 1).read_to_end(&mut bytes)
+        .map_err(|e| format!("Falha ao ler manifesto: {e}"))?;
+    if bytes.len() as u64 > MANIFEST_LIMIT {
+        return Err("Manifesto excede o tamanho permitido.".into());
+    }
+    let manifest: ReleaseManifest = serde_json::from_slice(&bytes)
+        .map_err(|e| format!("Manifesto inválido: {e}"))?;
+    let validated = manifest.installer()?;
+    let latest = version_parts(&manifest.version).ok_or("Versão remota inválida.")?;
     let current = version_parts(&current_version).ok_or("Versão local inválida.")?;
-    let latest_version = tag.trim_start_matches('v').to_string();
     let available = latest > current;
-    let installer = available.then(|| select_installer(&release, &latest_version)).flatten();
-    let release_url = release["html_url"].as_str().unwrap_or(RELEASES_URL);
-    let release_url = if release_url.starts_with("https://github.com/NskBR/SFTranslator/releases/") {
-        release_url.to_string()
-    } else { RELEASES_URL.into() };
+    let installer = available.then_some(validated);
     let result = UpdateCheckResult {
-        available, current_version, latest_version, release_url,
-        release_name: release["name"].as_str().map(str::to_string),
-        release_notes: release["body"].as_str().map(str::to_string),
+        available, current_version, latest_version: manifest.version.clone(), release_url: manifest_url(),
+        release_name: Some(format!("SFTranslator {}", manifest.version)),
+        release_notes: manifest.notes,
         installer_name: installer.as_ref().map(|asset| asset.name.clone()),
         installer_size: installer.as_ref().map(|asset| asset.size),
         install_supported: !cfg!(debug_assertions),
@@ -173,12 +192,18 @@ fn download_installer(app: &AppHandle, asset: &ApprovedInstaller, cancelled: &At
     let result = (|| {
         let client = reqwest::blocking::Client::builder()
             .user_agent("SFTranslator-updater")
+        .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(Duration::from_secs(15))
             .timeout(Duration::from_secs(900))
             .build().map_err(|e| e.to_string())?;
         let mut response = client.get(&asset.url).send()
             .map_err(|e| format!("Falha ao baixar atualização: {e}"))?
-            .error_for_status().map_err(|e| format!("GitHub recusou o download: {e}"))?;
+            .error_for_status().map_err(|e| format!("Servidor recusou o download: {e}"))?;
+        if response.status() != reqwest::StatusCode::OK
+            || response.content_length().is_some_and(|length| length != asset.size)
+        {
+            return Err("Resposta inválida para o instalador.".into());
+        }
         let mut output = File::create(&temporary).map_err(|e| format!("Falha ao criar arquivo temporário: {e}"))?;
         let mut digest = Sha256::new();
         let mut buffer = [0_u8; 64 * 1024];
@@ -188,6 +213,9 @@ fn download_installer(app: &AppHandle, asset: &ApprovedInstaller, cancelled: &At
             if cancelled.load(Ordering::Relaxed) { return Err("Download cancelado.".into()) }
             let count = response.read(&mut buffer).map_err(|e| format!("Falha no download: {e}"))?;
             if count == 0 { break }
+            if count as u64 > asset.size - downloaded {
+                return Err("O instalador excede o tamanho indicado no manifesto.".into());
+            }
             output.write_all(&buffer[..count]).map_err(|e| format!("Falha ao gravar atualização: {e}"))?;
             digest.update(&buffer[..count]);
             downloaded += count as u64;
@@ -224,7 +252,7 @@ pub(crate) fn download_update(app: AppHandle) -> Result<(), String> {
         if cfg!(debug_assertions) { return Err("Instale a versão distribuída para usar atualizações automáticas.".into()) }
         let cancelled = Arc::new(AtomicBool::new(false));
         state.cancellation = Some(cancelled.clone());
-        state.ready_path = None;
+        state.ready = None;
         state.progress = UpdateDownloadProgress { status: "downloading".into(),
             downloaded_bytes: 0, total_bytes: Some(asset.size), installer_name: Some(asset.name.clone()), message: None };
         (asset, cancelled)
@@ -234,7 +262,7 @@ pub(crate) fn download_update(app: AppHandle) -> Result<(), String> {
         let outcome = download_installer(&handle, &asset, &cancelled);
         if let Ok(mut state) = runtime().lock() {
             state.cancellation = None;
-            state.ready_path = outcome.as_ref().ok().cloned();
+            state.ready = outcome.as_ref().ok().map(|path| (path.clone(), asset.clone()));
         }
         match outcome {
             Ok(_) => set_progress(&handle, UpdateDownloadProgress { status: "ready".into(),
@@ -290,8 +318,7 @@ pub(crate) async fn install_downloaded_update(app: AppHandle) -> Result<(), Stri
     let (installer, digest) = {
         let state = runtime().lock().map_err(|_| "Atualizador indisponível.")?;
         if state.progress.status != "ready" { return Err("Nenhum instalador verificado está pronto.".into()) }
-        let installer = state.ready_path.clone().ok_or("Instalador ausente.")?;
-        let approved = state.approved.as_ref().ok_or("Release não verificado.")?;
+        let (installer, approved) = state.ready.clone().ok_or("Instalador ausente.")?;
         if installer.file_name().and_then(|name| name.to_str()) != Some(approved.name.as_str())
             || !installer.is_file() { return Err("Instalador verificado não foi encontrado.".into()) }
         (installer, approved.digest.clone())
@@ -331,12 +358,12 @@ pub(crate) async fn install_downloaded_update(app: AppHandle) -> Result<(), Stri
 #[tauri::command]
 pub(crate) fn open_release_page() -> Result<(), String> {
     #[cfg(windows)] {
-        Command::new("explorer.exe").arg(RELEASES_URL).spawn()
+        Command::new("explorer.exe").arg(manifest_url()).spawn()
             .map_err(|e| format!("Não foi possível abrir os releases: {e}"))?;
         Ok(())
     }
     #[cfg(not(windows))]
-    { Err("Página de releases disponível em https://github.com/NskBR/SFTranslator/releases".into()) }
+    { Err(format!("Manifesto disponível em {}", manifest_url())) }
 }
 
 #[cfg(test)]
@@ -344,19 +371,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn compares_valid_release_versions() {
-        assert!(version_parts("v0.2.0") > version_parts("0.1.9"));
-        assert_eq!(version_parts("test-2.0"), None);
-        assert_eq!(version_parts("v0.1.0-rc1"), None);
-    }
-
-    #[test]
-    fn selects_only_official_digest_verified_installer() {
-        let release = serde_json::json!({"assets": [{"name": "SFTranslator_0.2.0_x64-setup.exe",
-            "browser_download_url": "https://github.com/NskBR/SFTranslator/releases/download/v0.2.0/SFTranslator_0.2.0_x64-setup.exe",
-            "size": 100, "digest": format!("sha256:{}", "a".repeat(64))}]});
-        assert!(select_installer(&release, "0.2.0").is_some());
-        assert!(select_installer(&release, "0.1.0").is_none());
-        assert!(!official_installer_url("https://example.com/SFTranslator_0.2.0_x64-setup.exe"));
+    fn accepts_only_the_versioned_official_installer() {
+        let mut manifest = ReleaseManifest {
+            app: "SFTranslator".into(),
+            platform: "windows-x64".into(),
+            version: "0.2.0".into(),
+            file: INSTALLER_NAME.into(),
+            url: format!("{UPDATE_BASE}/releases/0.2.0/{INSTALLER_NAME}"),
+            size: 100,
+            sha256: "a".repeat(64),
+            notes: None,
+        };
+        assert!(version_parts("0.2.0") > version_parts("0.1.7"));
+        assert!(manifest.installer().is_ok());
+        manifest.version = "0.2.1".into();
+        assert!(manifest.installer().is_err());
+        manifest.url = format!("https://example.invalid/{INSTALLER_NAME}");
+        assert!(manifest.installer().is_err());
+        assert!(version_parts("00.2.0").is_none());
     }
 }

@@ -1,0 +1,8 @@
+## SFTranslator 0.1.5
+
+- Temas personalizados locais e oficiais do catálogo SFDownloader, com superfícies, tipografia, ícones animados e formatos de janela.
+- Página de métricas com palavras traduzidas e resultados de jogos monitorados. A contagem começa nesta versão.
+- Correção do entrypoint BepInEx em Unity 6 Mono para evitar o crash do XUnity, preservando a configuração de jogos antigos.
+- Inicialização da janela após preparar a interface e ajustes no contorno do Windows.
+
+O instalador inclui os runtimes locais Ren'Py e Unity; modelos de idiomas permanecem gerenciados pelo aplicativo. O instalador NSIS x64 é o arquivo usado pelo atualizador automático.

@@ -1,0 +1,3 @@
+O SFTranslator passa a distribuir atualizações pelo Filebase.
+
+O aplicativo verifica o tamanho e o SHA-256 do instalador antes da instalação.

@@ -1,0 +1,8 @@
+{
+  "endpoint": "https://s3.filebase.io",
+  "region": "auto",
+  "bucket": "sfs",
+  "publicBaseUrl": "https://sftranslator-updates.nskbr.workers.dev",
+  "prefix": "sftranslator-updates",
+  "publicPrefix": "sftranslator/desktop"
+}

@@ -1,0 +1,12 @@
+Primeira versão com o atualizador integrado ao aplicativo. A partir desta instalação, novas versões podem ser verificadas e instaladas em **Configurações → Atualizações do aplicativo**.
+
+**Atenção:** a versão 0.1.0 não inclui o atualizador. Quem está nela precisa instalar a 0.1.1 manualmente uma vez.
+
+Nesta versão:
+- Motores reorganizados por integração, com suporte experimental a RPG Maker e Unreal.
+- Runtimes locais de tradução incluídos no instalador; modelos de idioma continuam sendo baixados conforme o fluxo escolhido.
+- Melhorias na captura de textos e nos caches dos motores.
+- Preservação de emoji e normalização de acentos no servidor de tradução usado por Unity, RPG Maker e Unreal.
+- Atualização do console, da biblioteca e dos diagnósticos.
+
+Instalador para Windows x64: `SFTranslator_0.1.1_x64-setup.exe`. O arquivo `SHA256SUMS.txt` contém o hash para conferência.

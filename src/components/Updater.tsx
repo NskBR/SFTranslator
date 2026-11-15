@@ -84,7 +84,7 @@ export type Updater = ReturnType<typeof useUpdater>;
 
 export function UpdateSettingsRow({ updater }: { updater: Updater }) {
   return <div className="update-settings-row">
-    <div><h3>Atualizações do aplicativo</h3><p>Versão {updater.version} · {updater.info?.available ? `Nova versão ${updater.info.latest_version} disponível` : updater.info ? "Você está na versão mais recente" : "Verifique no GitHub quando desejar"}</p></div>
+    <div><h3>Atualizações do aplicativo</h3><p>Versão {updater.version} · {updater.info?.available ? `Nova versão ${updater.info.latest_version} disponível` : updater.info ? "Você está na versão mais recente" : "Verifique se há uma nova versão"}</p></div>
     <button type="button" className="secondary" disabled={updater.checking} onClick={() => void updater.check(true)}><RefreshCw size={14} className={updater.checking ? "spin" : undefined}/>{updater.checking ? "Verificando…" : "Verificar agora"}</button>
   </div>;
 }
@@ -108,7 +108,7 @@ export function UpdateModal({ updater, gameRunning }: { updater: Updater; gameRu
       {info?.available && !info.installer_name && <p className="update-note warning">Esta versão ainda não tem um instalador NSIS x64 verificável. Abra o release para baixar manualmente.</p>}
       {info?.available && !info.install_supported && <p className="update-note">A instalação automática está disponível no aplicativo instalado, fora do modo de desenvolvimento.</p>}
       <footer>
-        {info?.available && <button type="button" className="secondary" onClick={() => void updater.act("open_release_page")}><ExternalLink size={15}/>Ver release</button>}
+        {info?.available && <button type="button" className="secondary" onClick={() => void updater.act("open_release_page")}><ExternalLink size={15}/>Ver manifesto</button>}
         {progress.status === "downloading" && <button type="button" className="secondary" onClick={() => void updater.act("cancel_update_download")}>Cancelar download</button>}
         {info?.available && info.installer_name && info.install_supported && (progress.status === "idle" || progress.status === "failed") && <button type="button" className="primary" onClick={() => void updater.act("download_update")}><ArrowDownToLine size={16}/>Baixar atualização</button>}
         {progress.status === "ready" && <button type="button" className="primary" disabled={gameRunning} onClick={() => void updater.act("install_downloaded_update")}>Instalar e reiniciar</button>}

@@ -1,0 +1,13 @@
+## Correções
+
+- Instalação Unity preserva BepInEx preexistente e adiciona somente o XUnity ausente.
+- Instalações parciais, variantes Mono/IL2CPP incompatíveis e arquivos conflitantes agora interrompem a instalação antes da cópia.
+- Verificação da integração exige os componentes necessários do XUnity e faz backup do AutoTranslatorConfig.ini antes de alterações.
+
+## Verificação
+
+- 33 testes Python passaram (1 teste opcional ignorado).
+- Pacotes oficiais Mono e IL2CPP, x86 e x64, validados em jogos simulados.
+- Build de produção Tauri/NSIS gerado localmente e SHA-256 conferido.
+
+A detecção de arquivos não garante que o loader BepInEx iniciou em todos os jogos; caso a tradução não apareça, confira o log do jogo.

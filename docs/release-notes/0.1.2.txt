@@ -1,0 +1,5 @@
+Atualização 0.1.2 para testar o atualizador integrado a partir da versão 0.1.1.
+
+- RPG Maker 95, 2000/2003, XP, VX e VX Ace: OCR local experimental com sobreposição, cache por fluxo e seleção manual da família quando a detecção falhar.
+- MV/MZ e Unite mantêm as integrações existentes.
+- O instalador inclui os runtimes locais. O OCR depende do idioma de reconhecimento instalado no Windows e ainda precisa de testes em jogos dessas versões.

@@ -9,6 +9,8 @@ $env:CARGO_TARGET_DIR = $buildTarget
 
 Push-Location $projectRoot
 try {
+    & node.exe scripts/sync-versions.mjs
+    if ($LASTEXITCODE -ne 0) { throw "A sincronizacao da versao falhou." }
     $npmVersion = (Get-Content -LiteralPath (Join-Path $projectRoot "package.json") -Raw | ConvertFrom-Json).version
     $tauriVersion = (Get-Content -LiteralPath (Join-Path $projectRoot "src-tauri\tauri.conf.json") -Raw | ConvertFrom-Json).version
     $cargoVersion = [regex]::Match((Get-Content -LiteralPath (Join-Path $projectRoot "src-tauri\Cargo.toml") -Raw), '(?m)^version\s*=\s*"([^"]+)"').Groups[1].Value
